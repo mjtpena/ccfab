@@ -246,6 +246,16 @@ struct TrayView: View {
 
             Spacer()
 
+            Button {
+                appState.toggleNotifications(!appState.notificationsEnabled)
+            } label: {
+                Image(systemName: appState.notificationsEnabled ? "bell.fill" : "bell.slash")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(appState.notificationsEnabled ? .secondary : .tertiary)
+            .help(appState.notificationsEnabled ? "Notifications on" : "Notifications off")
+
             Picker("", selection: $prefs.density) {
                 ForEach(TrayDensity.allCases) { d in
                     Text(d.rawValue).tag(d)

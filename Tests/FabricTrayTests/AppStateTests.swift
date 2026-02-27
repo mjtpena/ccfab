@@ -40,6 +40,8 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(state.errorMessage)
         XCTAssertNil(state.toastMessage)
         XCTAssertNil(state.pendingAction)
+        XCTAssertTrue(state.notificationsEnabled)
+        XCTAssertEqual(state.trayStatus, .idle)
     }
 
     // MARK: - Filtered Items
@@ -101,6 +103,20 @@ final class AppStateTests: XCTestCase {
         XCTAssertNil(state.toastMessage)
         XCTAssertNil(state.errorMessage)
         XCTAssertTrue(state.currentPath.isRoot)
+        XCTAssertEqual(state.trayStatus, .idle)
+    }
+
+    // MARK: - Notifications Toggle
+
+    func testToggleNotifications() {
+        let state = AppState()
+        XCTAssertTrue(state.notificationsEnabled)
+
+        state.toggleNotifications(false)
+        XCTAssertFalse(state.notificationsEnabled)
+
+        state.toggleNotifications(true)
+        XCTAssertTrue(state.notificationsEnabled)
     }
 
     // MARK: - Request Actions

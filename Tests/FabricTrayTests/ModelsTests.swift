@@ -228,4 +228,31 @@ final class ModelsTests: XCTestCase {
         let notebook = FabricItem(id: "1", name: "NB", type: .notebook, workspaceID: "ws-1", role: nil, capacityId: nil, capacity: nil, sensitivityLabel: nil)
         XCTAssertEqual(notebook.icon, FabricItemType.notebook.icon)
     }
+
+    // MARK: - TrayStatus
+
+    func testTrayStatusIdle() {
+        let status = TrayStatus.idle
+        XCTAssertEqual(status.icon, "diamond.fill")
+        XCTAssertEqual(status.badgeCount, 0)
+    }
+
+    func testTrayStatusRunning() {
+        let status = TrayStatus.running(count: 3)
+        XCTAssertEqual(status.icon, "diamond.fill")
+        XCTAssertEqual(status.badgeCount, 3)
+    }
+
+    func testTrayStatusAttention() {
+        let status = TrayStatus.attention
+        XCTAssertEqual(status.icon, "exclamationmark.diamond.fill")
+        XCTAssertEqual(status.badgeCount, 0)
+    }
+
+    func testTrayStatusEquatable() {
+        XCTAssertEqual(TrayStatus.idle, TrayStatus.idle)
+        XCTAssertEqual(TrayStatus.running(count: 2), TrayStatus.running(count: 2))
+        XCTAssertNotEqual(TrayStatus.running(count: 1), TrayStatus.running(count: 2))
+        XCTAssertNotEqual(TrayStatus.idle, TrayStatus.attention)
+    }
 }

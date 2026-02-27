@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 // MARK: - Auth
 
@@ -344,6 +345,47 @@ struct JobRun: Identifiable {
     let itemName: String
     let status: JobRunStatus
     let startedAt: Date?
+}
+
+// MARK: - Tray Status (CCMenu-style)
+
+enum TrayStatus: Equatable {
+    case idle
+    case running(count: Int)
+    case attention
+
+    var icon: String {
+        switch self {
+        case .idle: return "diamond.fill"
+        case .running: return "diamond.fill"
+        case .attention: return "exclamationmark.diamond.fill"
+        }
+    }
+
+    var badgeCount: Int {
+        switch self {
+        case .running(let count): return count
+        default: return 0
+        }
+    }
+}
+
+// MARK: - Notification Delegate
+
+final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .badge]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        // Tapping the notification could open the app / navigate — no-op for now
+    }
 }
 
 // MARK: - Navigation

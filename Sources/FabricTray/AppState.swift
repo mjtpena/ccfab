@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import UserNotifications
 
 @MainActor
 final class AppState: ObservableObject {
@@ -40,9 +41,14 @@ final class AppState: ObservableObject {
     // Confirmation workflow
     @Published var pendingAction: PendingAction?
 
+    // Notifications
+    @Published var notificationsEnabled = true
+    @Published var trayStatus: TrayStatus = .idle
+
     private let tokenStore = TokenStore()
     private lazy var authService = MicrosoftAuthService(tokenStore: tokenStore)
     private let api = FabricAPIClient()
+    private let notificationDelegate = NotificationDelegate()
     private let config = AppConfiguration(
         tenantID: AppDefaults.tenantID,
         clientID: AppDefaults.clientID
@@ -50,10 +56,13 @@ final class AppState: ObservableObject {
     private var jobPollTask: Task<Void, Never>?
     private var toastDismissTask: Task<Void, Never>?
     private var errorDismissTask: Task<Void, Never>?
+    private var previousJobStatuses: [String: JobRunStatus] = [:]
 
     init() {
         Task { @MainActor [weak self] in
+            self?.setupNotifications()
             self?.restoreSession()
+            self?.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         }
     }
 
@@ -91,6 +100,8 @@ final class AppState: ObservableObject {
         lastRefreshTime = nil
         currentPath = .root
         errorMessage = nil
+        previousJobStatuses = [:]
+        trayStatus = .idle
     }
 
     // MARK: - Navigation
@@ -417,9 +428,12 @@ final class AppState: ObservableObject {
     func fetchJobs() async {
         guard let wsID = currentPath.workspaceID,
               let token = await validToken() else { return }
-        recentJobs = await api.listWorkspaceJobs(
+        let newJobs = await api.listWorkspaceJobs(
             workspaceID: wsID, items: allItems, accessToken: token.accessToken
         )
+        detectJobTransitions(oldJobs: recentJobs, newJobs: newJobs)
+        recentJobs = newJobs
+        updateTrayStatus()
     }
 
     // MARK: - ACL
@@ -445,6 +459,82 @@ final class AppState: ObservableObject {
             )
         } catch {
             showError(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Notifications
+
+    func toggleNotifications(_ enabled: Bool) {
+        notificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "notificationsEnabled")
+    }
+
+    private func setupNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = notificationDelegate
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    private func detectJobTransitions(oldJobs: [JobRun], newJobs: [JobRun]) {
+        guard notificationsEnabled, !oldJobs.isEmpty else {
+            // Seed the status map on first fetch so we don't spam on app launch
+            for job in newJobs {
+                previousJobStatuses[job.id] = job.status
+            }
+            return
+        }
+        let oldMap = Dictionary(uniqueKeysWithValues: oldJobs.map { ($0.id, $0.status) })
+            .merging(previousJobStatuses) { current, _ in current }
+
+        for job in newJobs {
+            let prev = oldMap[job.id]
+            if let prev, prev == .inProgress, job.status != .inProgress {
+                sendJobNotification(job)
+            }
+            previousJobStatuses[job.id] = job.status
+        }
+    }
+
+    private func sendJobNotification(_ job: JobRun) {
+        let content = UNMutableNotificationContent()
+        switch job.status {
+        case .completed:
+            content.title = "✅ Job Completed"
+            content.body = "\(job.itemName) finished successfully."
+            content.sound = .default
+        case .failed:
+            content.title = "❌ Job Failed"
+            content.body = "\(job.itemName) failed."
+            content.sound = UNNotificationSound.defaultCritical
+        case .cancelled:
+            content.title = "⏹ Job Cancelled"
+            content.body = "\(job.itemName) was cancelled."
+            content.sound = .default
+        default:
+            content.title = "Job Update"
+            content.body = "\(job.itemName): \(job.status.rawValue)"
+            content.sound = .default
+        }
+        content.categoryIdentifier = "JOB_STATUS"
+        content.userInfo = ["jobId": job.id, "itemId": job.itemID]
+
+        let request = UNNotificationRequest(
+            identifier: "job-\(job.id)-\(job.status.rawValue)",
+            content: content, trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private func updateTrayStatus() {
+        let activeJobs = recentJobs.filter { $0.status == .inProgress }
+        let hasFailed = recentJobs.contains { $0.status == .failed }
+
+        if !activeJobs.isEmpty {
+            trayStatus = .running(count: activeJobs.count)
+        } else if hasFailed {
+            trayStatus = .attention
+        } else {
+            trayStatus = .idle
         }
     }
 
