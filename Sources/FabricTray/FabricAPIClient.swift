@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+import os
+
+private let armLog = Logger(subsystem: "com.ccfab.fabrictray", category: "ARM")
 
 enum FabricAPIError: LocalizedError {
     case invalidEndpoint
@@ -73,13 +76,8 @@ final class FabricAPIClient: @unchecked Sendable {
     /// List Fabric capacities via Azure Resource Manager API.
     /// Uses a separate ARM-scoped token. Returns capacities the user can see as Azure Reader+.
     func listCapacitiesViaARM(armAccessToken: String) async -> [String: FabricCapacity] {
-        let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
         func appendLog(_ msg: String) {
-            if let data = "[\(Date())] ARM: \(msg)\n".data(using: .utf8) {
-                if FileManager.default.fileExists(atPath: logFile.path) {
-                    if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
-                } else { try? data.write(to: logFile) }
-            }
+            armLog.debug("\(msg, privacy: .public)")
         }
 
         // First list subscriptions

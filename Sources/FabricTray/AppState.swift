@@ -1,8 +1,11 @@
 import AppKit
 import Foundation
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
+
+private let appLog = Logger(subsystem: "com.ccfab.fabrictray", category: "AppState")
 
 @MainActor
 final class AppState: ObservableObject {
@@ -251,7 +254,6 @@ final class AppState: ObservableObject {
                     let rawTables = try await api.listTables(workspaceID: wsID, lakehouseID: lhID, accessToken: token.accessToken)
                     allItems = rawTables.compactMap { dict -> FabricItem? in
                         guard let name = dict["name"] as? String else { return nil }
-                        let tblType = dict["type"] as? String ?? ""
                         return FabricItem(
                             id: "\(lhID)_\(name)",
                             name: name,
@@ -515,7 +517,7 @@ final class AppState: ObservableObject {
         panel.allowsMultipleSelection = false
         let result = panel.runModal()
         guard result == .OK, let url = panel.url else { return }
-        guard let token = await validToken() else { return }
+        guard await validToken() != nil else { return }
         do {
             let data = try Data(contentsOf: url)
             // Try to parse as definition to determine item ID, or create new
@@ -825,18 +827,10 @@ final class AppState: ObservableObject {
         }
 
         self.capacities = Array(capsMap.values).sorted { $0.displayName < $1.displayName }
-        // Debug: write capacity info to file
-        let debugLines = self.capacities.map { cap in
-            "Capacity: \(cap.displayName) | SKU: \(cap.sku) | ARM: \(cap.armResourceId ?? "nil") | canPauseResume: \(cap.canPauseResume) | state: \(cap.state)"
-        }
-        let debugStr = "[\(Date())] enrichWorkspaces — \(capsMap.count) in capsMap, \(self.capacities.count) total\n" + debugLines.joined(separator: "\n") + "\n\n"
-        if let data = debugStr.data(using: .utf8) {
-            let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
-            if FileManager.default.fileExists(atPath: logFile.path) {
-                if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
-            } else {
-                try? data.write(to: logFile)
-            }
+        appLog.debug("enrichWorkspaces — \(capsMap.count) in capsMap, \(self.capacities.count) total")
+        for cap in self.capacities {
+            let armId = cap.armResourceId ?? "nil"
+            appLog.debug("  Capacity: \(cap.displayName) | SKU: \(cap.sku) | ARM: \(armId) | canPauseResume: \(cap.canPauseResume) | state: \(cap.state)")
         }
 
         guard !capsMap.isEmpty || !roles.isEmpty else { return }
@@ -906,23 +900,16 @@ final class AppState: ObservableObject {
 
     /// Fetch Fabric capacities via Azure Resource Manager using a separate ARM-scoped token.
     private func fetchCapacitiesViaARM() async -> [String: FabricCapacity] {
-        let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
-        func appendLog(_ msg: String) {
-            if let data = "[\(Date())] \(msg)\n".data(using: .utf8) {
-                if FileManager.default.fileExists(atPath: logFile.path) {
-                    if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
-                } else { try? data.write(to: logFile) }
-            }
-        }
         guard let armToken = try? await authService.armAccessToken(configuration: config) else {
-            appendLog("ARM token fetch FAILED")
+            appLog.error("ARM token fetch FAILED")
             return [:]
         }
-        appendLog("ARM token acquired, listing capacities...")
+        appLog.debug("ARM token acquired, listing capacities...")
         let result = await api.listCapacitiesViaARM(armAccessToken: armToken)
-        appendLog("ARM returned \(result.count) capacities")
+        appLog.debug("ARM returned \(result.count) capacities")
         for (k, v) in result {
-            appendLog("  ARM cap: \(k) -> \(v.displayName) (SKU: \(v.sku), ARM ID: \(v.armResourceId ?? "nil"))")
+            let armId = v.armResourceId ?? "nil"
+            appLog.debug("  ARM cap: \(k) -> \(v.displayName) (SKU: \(v.sku), ARM ID: \(armId))")
         }
         return result
     }
