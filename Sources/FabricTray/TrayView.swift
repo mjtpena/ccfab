@@ -15,43 +15,93 @@ private enum Palette {
     static let separator = Color.primary.opacity(0.08)
 }
 
+// MARK: - Shimmer Loading
+
+private struct ShimmerModifier: ViewModifier {
+    @State private var phase: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                LinearGradient(
+                    gradient: Gradient(colors: [.clear, .white.opacity(0.15), .clear]),
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .offset(x: phase)
+                .mask(content)
+            )
+            .onAppear {
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    phase = 200
+                }
+            }
+    }
+}
+
+private struct SkeletonRow: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.primary.opacity(0.06))
+                .frame(width: 14, height: 14)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.primary.opacity(0.06))
+                .frame(width: CGFloat.random(in: 80...160), height: 10)
+            Spacer()
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.primary.opacity(0.04))
+                .frame(width: 40, height: 8)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .modifier(ShimmerModifier())
+    }
+}
+
 struct TrayView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var prefs: TrayPreferences
     @State private var expandedItemID: String?
     @State private var showCapacities = false
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerBar
-            Divider().opacity(0.5)
-
-            if appState.isSignedIn {
-                itemList
-
-                if !appState.currentPath.isRoot {
-                    Divider().opacity(0.5)
-                    jobsSection
-                }
-
-                if appState.currentPath.isRoot && !appState.capacities.isEmpty {
-                    Divider().opacity(0.5)
-                    capacitiesSection
-                }
-            } else {
-                signedOutPlaceholder
-            }
-
-            statusBar
-
-            if appState.pendingAction != nil {
-                Divider().opacity(0.5)
-                ActionConfirmationView()
+            // Onboarding overlay
+            if !appState.hasCompletedOnboarding && !appState.isSignedIn {
+                OnboardingView()
                     .environmentObject(appState)
-            }
+            } else {
+                headerBar
+                Divider().opacity(0.5)
 
-            Divider().opacity(0.5)
-            footerBar
+                if appState.isSignedIn {
+                    // Recent items (root only, when not searching)
+                    if appState.currentPath.isRoot && appState.searchQuery.isEmpty && !appState.recentItems.isEmpty {
+                        recentsSection
+                        Divider().opacity(0.5)
+                    }
+
+                    itemList
+
+                    if !appState.currentPath.isRoot {
+                        Divider().opacity(0.5)
+                        jobsSection
+                    }
+
+                    if appState.currentPath.isRoot && !appState.capacities.isEmpty {
+                        Divider().opacity(0.5)
+                        capacitiesSection
+                    }
+                } else {
+                    signedOutPlaceholder
+                }
+
+                statusBar
+
+                Divider().opacity(0.5)
+                footerBar
+            }
         }
         .frame(width: prefs.density.windowWidth)
         .task {
@@ -65,33 +115,54 @@ struct TrayView: View {
 
     private var headerBar: some View {
         HStack(spacing: 6) {
-            // Breadcrumb
+            // Breadcrumb navigation (supports 3 levels)
             HStack(spacing: 2) {
-                Button {
-                    Task { await appState.navigateUp() }
-                } label: {
-                    Image(systemName: "house.fill")
-                        .font(.system(size: 10))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(appState.currentPath.isRoot ? Palette.muted : Palette.accent)
-                .disabled(!appState.isSignedIn || appState.currentPath.isRoot)
-
-                if let wsName = appState.currentPath.workspaceName {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.quaternary)
-                    Text(wsName)
-                        .font(.system(.caption2, design: .default))
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 120)
+                let segments = appState.currentPath.breadcrumbSegments
+                ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(.quaternary)
+                    }
+                    if index == 0 {
+                        Button {
+                            Task { await appState.navigate(to: .root) }
+                        } label: {
+                            Image(systemName: "house.fill")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(appState.currentPath.isRoot ? Palette.muted : Palette.accent)
+                        .disabled(!appState.isSignedIn || appState.currentPath.isRoot)
+                        .accessibilityLabel("Home")
+                    } else if index < segments.count - 1 {
+                        // Clickable intermediate segment
+                        Button {
+                            Task { await appState.navigate(to: segment.path) }
+                        } label: {
+                            Text(segment.label)
+                                .font(.system(.caption2, design: .default))
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: 90)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Palette.accent)
+                    } else {
+                        // Current (non-clickable) segment
+                        Text(segment.label)
+                            .font(.system(.caption2, design: .default))
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 90)
+                    }
                 }
             }
 
             if appState.isSignedIn {
-                // Search
+                // Search field
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 9))
@@ -102,6 +173,8 @@ struct TrayView: View {
                     )
                     .textFieldStyle(.plain)
                     .font(.system(.caption2))
+                    .focused($isSearchFocused)
+                    .accessibilityLabel("Search items")
                     if !appState.searchQuery.isEmpty {
                         Button {
                             appState.searchQuery = ""
@@ -111,13 +184,14 @@ struct TrayView: View {
                                 .foregroundStyle(.quaternary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
                     }
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(Palette.faint)
+                        .fill(isSearchFocused ? Palette.faint.opacity(2) : Palette.faint)
                 )
             } else {
                 Spacer()
@@ -126,9 +200,10 @@ struct TrayView: View {
             if appState.isLoading || appState.isAuthenticating {
                 ProgressView()
                     .controlSize(.small)
+                    .accessibilityLabel("Loading")
             }
 
-            // Actions
+            // Actions with keyboard shortcuts
             if appState.isSignedIn {
                 Button {
                     if appState.currentPath.isRoot {
@@ -142,7 +217,19 @@ struct TrayView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.accent)
-                .help(appState.currentPath.isRoot ? "New workspace" : "New item")
+                .help(appState.currentPath.isRoot ? "New workspace (⌘N)" : "New item (⌘N)")
+                .keyboardShortcut("n")
+                .accessibilityLabel(appState.currentPath.isRoot ? "New workspace" : "New item")
+
+                Button { isSearchFocused = true } label: { EmptyView() }
+                    .keyboardShortcut("f")
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+
+                Button { Task { await appState.refresh() } } label: { EmptyView() }
+                    .keyboardShortcut("r")
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
             }
 
             authButton
@@ -202,7 +289,12 @@ struct TrayView: View {
     private var itemList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if appState.filteredItems.isEmpty && !appState.isLoading {
+                if appState.isLoading && appState.allItems.isEmpty {
+                    // Skeleton loading state
+                    ForEach(0..<6, id: \.self) { _ in
+                        SkeletonRow()
+                    }
+                } else if appState.filteredItems.isEmpty && !appState.isLoading {
                     VStack(spacing: 4) {
                         Image(systemName: appState.searchQuery.isEmpty ? "tray" : "magnifyingglass")
                             .font(.system(size: 16))
@@ -213,10 +305,15 @@ struct TrayView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
+                    .accessibilityLabel(appState.searchQuery.isEmpty ? "No items found" : "No matches for search query")
                 } else {
                     ForEach(appState.filteredItems) { item in
                         VStack(alignment: .leading, spacing: 0) {
-                            ItemRow(item: item, isExpanded: expandedItemID == item.id) {
+                            ItemRow(
+                                item: item,
+                                isExpanded: expandedItemID == item.id,
+                                isFavorite: appState.isFavorite(item.id)
+                            ) {
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     expandedItemID = expandedItemID == item.id ? nil : item.id
                                 }
@@ -232,15 +329,61 @@ struct TrayView: View {
                     }
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: appState.filteredItems.map(\.id))
         }
-        .frame(maxHeight: prefs.density.maxListHeight)
+        .frame(minHeight: prefs.density.minListHeight, maxHeight: prefs.density.maxListHeight)
+    }
+
+    // MARK: - Recents Section
+
+    private var recentsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Palette.muted)
+                Text("Recent")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Palette.muted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 5)
+            .padding(.bottom, 3)
+
+            ForEach(appState.recentItems.prefix(3), id: \.id) { recent in
+                Button {
+                    Task {
+                        let item = FabricItem(
+                            id: recent.id, name: recent.name, type: recent.type,
+                            workspaceID: nil, role: nil, capacityId: nil, capacity: nil, sensitivityLabel: nil
+                        )
+                        await appState.enter(item: item)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        FabricIconView(recent.type, size: 10)
+                        Text(recent.name)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Recent: \(recent.name)")
+            }
+        }
+        .padding(.bottom, 3)
     }
 
     // MARK: - Signed Out
 
     private var signedOutPlaceholder: some View {
-        VStack(spacing: 8) {
-            FabricIconView(.workspace, size: 28)
+        VStack(spacing: 12) {
+            FabricIconView(.workspace, size: 32)
                 .opacity(0.6)
             Text("Microsoft Fabric")
                 .font(.system(.caption, weight: .semibold))
@@ -249,9 +392,32 @@ struct TrayView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
+
+            // Feature highlights
+            VStack(alignment: .leading, spacing: 6) {
+                featureRow(icon: "folder.fill", text: "Browse workspaces & items")
+                featureRow(icon: "play.fill", text: "Run notebooks & pipelines")
+                featureRow(icon: "bolt.fill", text: "Monitor jobs in real-time")
+                featureRow(icon: "cpu", text: "Manage capacities & access")
+            }
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Microsoft Fabric. Sign in to browse workspaces, items, and jobs.")
+    }
+
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(Palette.accent.opacity(0.7))
+                .frame(width: 14)
+            Text(text)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     // MARK: - Status Bar (toast / error)
@@ -271,7 +437,8 @@ struct TrayView: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.success.opacity(0.08))
-            .transition(.opacity)
+            .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
+            .accessibilityLabel("Success: \(toast)")
         }
 
         if let error = appState.errorMessage {
@@ -283,11 +450,29 @@ struct TrayView: View {
                     .font(.caption2)
                     .foregroundStyle(Palette.destructive.opacity(0.9))
                     .lineLimit(2)
+                Spacer()
+                if appState.lastFailedAction != nil {
+                    Button {
+                        Task { await appState.retryLastAction() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 8))
+                            Text("Retry")
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.destructive.opacity(0.8))
+                    .accessibilityLabel("Retry failed action")
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.destructive.opacity(0.06))
+            .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
+            .accessibilityLabel("Error: \(error)")
         }
     }
 
@@ -307,11 +492,13 @@ struct TrayView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.muted)
                 .disabled(appState.isLoading)
-                .help("Refresh")
+                .help("Refresh (⌘R)")
+                .accessibilityLabel("Refresh")
 
                 Text("\(appState.filteredItems.count) items")
                     .font(.system(size: 9))
                     .foregroundStyle(.quaternary)
+                    .accessibilityLabel("\(appState.filteredItems.count) items")
 
                 if let time = appState.lastRefreshTime {
                     Text("·")
@@ -320,6 +507,7 @@ struct TrayView: View {
                     Text(time, style: .relative)
                         .font(.system(size: 9))
                         .foregroundStyle(.quaternary)
+                        .accessibilityLabel("Last refreshed")
                 }
 
                 if !appState.currentPath.isRoot {
@@ -332,6 +520,7 @@ struct TrayView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.muted)
                     .help("Import definition")
+                    .accessibilityLabel("Import definition")
                 }
             }
 
@@ -346,6 +535,7 @@ struct TrayView: View {
             .buttonStyle(.plain)
             .foregroundStyle(appState.notificationsEnabled ? Palette.muted : Color.gray)
             .help(appState.notificationsEnabled ? "Notifications on" : "Notifications off")
+            .accessibilityLabel(appState.notificationsEnabled ? "Disable notifications" : "Enable notifications")
 
             Picker("", selection: $prefs.density) {
                 ForEach(TrayDensity.allCases) { d in
@@ -356,6 +546,7 @@ struct TrayView: View {
             .frame(width: 60)
             .controlSize(.mini)
             .help("Display density")
+            .accessibilityLabel("Display density")
 
             Button {
                 NSApplication.shared.terminate(nil)
@@ -367,6 +558,7 @@ struct TrayView: View {
             .foregroundStyle(.quaternary)
             .help("Quit FabricTray")
             .keyboardShortcut("q")
+            .accessibilityLabel("Quit")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -386,7 +578,7 @@ struct TrayView: View {
                     ForEach(appState.recentJobs.prefix(10)) { job in
                         HStack(spacing: 6) {
                             Image(systemName: job.status.icon)
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                                 .foregroundStyle(jobStatusColor(job.status))
                             Text(job.itemName.isEmpty ? String(job.itemID.prefix(8)) : job.itemName)
                                 .font(.caption2)
@@ -402,17 +594,20 @@ struct TrayView: View {
                                 .buttonStyle(.plain)
                                 .foregroundStyle(Palette.destructive.opacity(0.7))
                                 .help("Cancel job")
+                                .accessibilityLabel("Cancel job \(job.itemName)")
                             }
                             Text(job.status.rawValue)
-                                .font(.system(size: 8, weight: .medium))
+                                .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(jobStatusColor(job.status).opacity(0.8))
                             if let date = job.startedAt {
                                 Text(date, style: .relative)
-                                    .font(.system(size: 8))
+                                    .font(.system(size: 9))
                                     .foregroundStyle(.quaternary)
                             }
                         }
                         .padding(.vertical, 2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("\(job.itemName), \(job.status.rawValue)")
                     }
                 }
             }
@@ -427,7 +622,7 @@ struct TrayView: View {
                 let running = appState.recentJobs.filter { $0.status == .inProgress }.count
                 if running > 0 {
                     Text("\(running) running")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -436,7 +631,7 @@ struct TrayView: View {
                 let failed = appState.recentJobs.filter { $0.status == .failed }.count
                 if failed > 0 {
                     Text("\(failed) failed")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -447,6 +642,7 @@ struct TrayView: View {
         .font(.caption)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+        .accessibilityLabel("Jobs section")
     }
 
     // MARK: - Capacities Section
@@ -457,7 +653,7 @@ struct TrayView: View {
                 ForEach(appState.capacities, id: \.id) { cap in
                     HStack(spacing: 6) {
                         Text(cap.sku)
-                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 2)
@@ -471,11 +667,13 @@ struct TrayView: View {
                                 .fill(cap.isActive ? Palette.success : Palette.destructive)
                                 .frame(width: 5, height: 5)
                             Text(cap.isActive ? cap.region : "Paused")
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                                 .foregroundStyle(cap.isActive ? Color.secondary : Palette.destructive)
                         }
                     }
                     .padding(.vertical, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(cap.displayName), \(cap.sku), \(cap.isActive ? cap.region : "Paused")")
                 }
             }
         } label: {
@@ -492,7 +690,7 @@ struct TrayView: View {
                 let paused = appState.capacities.filter { !$0.isActive }.count
                 if paused > 0 {
                     Text("\(paused) paused")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -503,6 +701,7 @@ struct TrayView: View {
         .font(.caption)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
+        .accessibilityLabel("Capacities section")
     }
 
     private func jobStatusColor(_ status: JobRunStatus) -> Color {
@@ -552,10 +751,10 @@ struct ItemDetailView: View {
             // ID row
             HStack(spacing: 3) {
                 Text("ID")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.quaternary)
                 Text(item.id)
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.quaternary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -592,7 +791,7 @@ struct ItemDetailView: View {
             if let cap = item.capacity {
                 HStack(spacing: 5) {
                     Text(cap.sku)
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
@@ -605,7 +804,7 @@ struct ItemDetailView: View {
                         .foregroundStyle(.tertiary)
                     if !cap.isActive {
                         Text("PAUSED")
-                            .font(.system(size: 7, weight: .bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -624,7 +823,7 @@ struct ItemDetailView: View {
                     ForEach(appState.roleAssignments) { ra in
                         HStack(spacing: 5) {
                             Image(systemName: ra.role.icon)
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                                 .foregroundStyle(Palette.muted)
                                 .frame(width: 12)
                             Text(ra.principalName)
@@ -632,7 +831,7 @@ struct ItemDetailView: View {
                                 .lineLimit(1)
                             Spacer()
                             Text(ra.principalType)
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                                 .foregroundStyle(.quaternary)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
@@ -646,8 +845,10 @@ struct ItemDetailView: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(Palette.destructive.opacity(0.5))
                             .help("Remove access")
+                            .accessibilityLabel("Remove access for \(ra.principalName)")
                         }
                         .padding(.vertical, 2)
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
@@ -664,6 +865,7 @@ struct ItemDetailView: View {
             .buttonStyle(.plain)
             .foregroundStyle(Palette.accent)
             .padding(.top, 2)
+            .accessibilityLabel("Add access")
         }
     }
 
@@ -673,7 +875,7 @@ struct ItemDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Text("Type")
-                            .font(.system(size: 8, weight: .medium))
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.quaternary)
                         Text(item.type.rawValue)
                             .font(.system(size: 9, weight: .medium))
@@ -688,7 +890,7 @@ struct ItemDetailView: View {
                     if let label = detail.sensitivityLabel {
                         HStack(spacing: 3) {
                             Image(systemName: "tag.fill")
-                                .font(.system(size: 8))
+                                .font(.system(size: 9))
                             Text(label.name)
                                 .font(.system(size: 9, weight: .medium))
                         }
@@ -722,6 +924,7 @@ struct ItemDetailView: View {
 struct ItemRow: View {
     let item: FabricItem
     let isExpanded: Bool
+    let isFavorite: Bool
     let onToggleExpand: () -> Void
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var prefs: TrayPreferences
@@ -729,6 +932,14 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            // Favorite indicator
+            if isFavorite {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(Palette.warning)
+                    .accessibilityLabel("Favorited")
+            }
+
             FabricIconView(item.type)
                 .frame(width: prefs.density.iconSize, height: prefs.density.iconSize)
 
@@ -741,12 +952,12 @@ struct ItemRow: View {
                     .truncationMode(.tail)
             }
             .buttonStyle(.plain)
-            .disabled(item.type != .workspace)
+            .disabled(item.type != .workspace && item.type != .lakehouse)
 
             if item.type == .workspace {
                 if let role = item.role {
                     Image(systemName: role.icon)
-                        .font(.system(size: 8))
+                        .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                         .help(role.rawValue)
                 }
@@ -754,14 +965,14 @@ struct ItemRow: View {
                     if let cap = item.capacity {
                         HStack(spacing: 2) {
                             Text(cap.sku)
-                                .font(.system(size: 7, weight: .bold, design: .rounded))
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 3)
                                 .padding(.vertical, 1)
                                 .background(RoundedRectangle(cornerRadius: 3).fill(skuColor(cap)))
                             if !cap.isActive {
                                 Image(systemName: "pause.circle.fill")
-                                    .font(.system(size: 7))
+                                    .font(.system(size: 9))
                                     .foregroundStyle(Palette.destructive)
                                     .help("Capacity paused")
                             }
@@ -776,7 +987,7 @@ struct ItemRow: View {
             } else {
                 if let label = item.sensitivityLabel {
                     Text(label.name)
-                        .font(.system(size: 7, weight: .medium))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(Palette.warning)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -784,13 +995,13 @@ struct ItemRow: View {
                         .lineLimit(1)
                 }
                 Text(item.type.rawValue)
-                    .font(.system(size: 8))
+                    .font(.system(size: 9))
                     .foregroundStyle(.quaternary)
             }
 
             Spacer()
 
-            // Action buttons — only visible on hover
+            // Action buttons — visible on hover
             Group {
                 Button { onToggleExpand() } label: {
                     Image(systemName: isExpanded ? "info.circle.fill" : "info.circle")
@@ -799,9 +1010,11 @@ struct ItemRow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(isExpanded ? Palette.accent : Palette.muted.opacity(0.5))
                 .help("Details")
+                .accessibilityLabel("Show details for \(item.name)")
 
                 if item.type.isRunnable {
                     Button {
+                        appState.pendingActionItemID = item.id
                         appState.requestRun(item)
                     } label: {
                         Image(systemName: "play.fill")
@@ -810,6 +1023,7 @@ struct ItemRow: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.accent)
                     .help("Run")
+                    .accessibilityLabel("Run \(item.name)")
                 }
 
                 Button {
@@ -821,8 +1035,9 @@ struct ItemRow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.muted.opacity(0.5))
                 .help("Open in browser")
+                .accessibilityLabel("Open \(item.name) in browser")
             }
-            .opacity(isHovered || isExpanded ? 1 : 0.3)
+            .opacity(isHovered || isExpanded ? 1 : 0)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, prefs.density.rowVPad)
@@ -832,8 +1047,24 @@ struct ItemRow: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .popover(isPresented: Binding(
+            get: { appState.pendingAction != nil && appState.pendingActionItemID == item.id },
+            set: { if !$0 { appState.dismissAction(); appState.pendingActionItemID = nil } }
+        ), arrowEdge: .trailing) {
+            ActionConfirmationView()
+                .environmentObject(appState)
+                .frame(width: 280)
+        }
         .contextMenu {
             Section {
+                Button {
+                    appState.toggleFavorite(item.id)
+                } label: {
+                    Label(
+                        isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                        systemImage: isFavorite ? "star.slash" : "star"
+                    )
+                }
                 Button { copyToClipboard(item.name) } label: {
                     Label("Copy Name", systemImage: "doc.on.clipboard")
                 }
@@ -846,56 +1077,88 @@ struct ItemRow: View {
             }
             if item.type.isRunnable {
                 Section {
-                    Button { appState.requestRun(item) } label: {
+                    Button {
+                        appState.pendingActionItemID = item.id
+                        appState.requestRun(item)
+                    } label: {
                         Label("Run…", systemImage: "play.fill")
                     }
                 }
             }
             Section {
-                Button { appState.requestRename(item) } label: {
+                Button {
+                    appState.pendingActionItemID = item.id
+                    appState.requestRename(item)
+                } label: {
                     Label("Rename…", systemImage: "pencil")
                 }
-                Button(role: .destructive) { appState.requestDelete(item) } label: {
+                Button(role: .destructive) {
+                    appState.pendingActionItemID = item.id
+                    appState.requestDelete(item)
+                } label: {
                     Label("Delete…", systemImage: "trash")
                 }
             }
             if item.type == .workspace {
                 Section("Capacity") {
-                    Button { appState.requestAssignCapacity(item) } label: {
+                    Button {
+                        appState.pendingActionItemID = item.id
+                        appState.requestAssignCapacity(item)
+                    } label: {
                         Label("Assign Capacity…", systemImage: "cpu")
                     }
                     if item.isOnCapacity {
-                        Button(role: .destructive) { appState.requestUnassignCapacity(item) } label: {
+                        Button(role: .destructive) {
+                            appState.pendingActionItemID = item.id
+                            appState.requestUnassignCapacity(item)
+                        } label: {
                             Label("Unassign Capacity…", systemImage: "cpu.fill")
                         }
                     }
                 }
             } else {
                 Section("Advanced") {
-                    Button { appState.requestExport(item) } label: {
+                    Button {
+                        appState.pendingActionItemID = item.id
+                        appState.requestExport(item)
+                    } label: {
                         Label("Export Definition…", systemImage: "square.and.arrow.up")
                     }
-                    Button { appState.requestSetLabel(item) } label: {
+                    Button {
+                        appState.pendingActionItemID = item.id
+                        appState.requestSetLabel(item)
+                    } label: {
                         Label("Set Label…", systemImage: "tag")
                     }
                     if item.sensitivityLabel != nil {
-                        Button(role: .destructive) { appState.requestRemoveLabel(item) } label: {
+                        Button(role: .destructive) {
+                            appState.pendingActionItemID = item.id
+                            appState.requestRemoveLabel(item)
+                        } label: {
                             Label("Remove Label…", systemImage: "tag.slash")
                         }
                     }
                     if item.type.supportsShortcuts {
-                        Button { appState.requestCreateShortcut(item) } label: {
+                        Button {
+                            appState.pendingActionItemID = item.id
+                            appState.requestCreateShortcut(item)
+                        } label: {
                             Label("Create Shortcut…", systemImage: "link")
                         }
                     }
                     if item.type.supportsUpload {
-                        Button { appState.requestUploadFile(item) } label: {
+                        Button {
+                            appState.pendingActionItemID = item.id
+                            appState.requestUploadFile(item)
+                        } label: {
                             Label("Upload File…", systemImage: "arrow.up.doc")
                         }
                     }
                 }
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.name), \(item.type.rawValue)")
     }
 
     private func skuColor(_ cap: FabricCapacity) -> Color {
@@ -980,6 +1243,8 @@ struct ActionConfirmationView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(Palette.sectionBG)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Confirm action: \(action.title)")
         }
     }
 
@@ -994,6 +1259,7 @@ struct ActionConfirmationView: View {
                     TextField("{\"key\": \"value\"}", text: $textInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 10, design: .monospaced))
+                        .accessibilityLabel("Execution parameters")
                 }
             }
 
@@ -1001,15 +1267,18 @@ struct ActionConfirmationView: View {
             TextField("New name", text: $textInput)
                 .textFieldStyle(.roundedBorder).font(.caption)
                 .onAppear { textInput = item.name }
+                .accessibilityLabel("New name")
 
         case .createWorkspace:
             TextField("Workspace name", text: $textInput)
                 .textFieldStyle(.roundedBorder).font(.caption)
+                .accessibilityLabel("Workspace name")
 
         case .createItem:
             VStack(spacing: 4) {
                 TextField("Item name", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
+                    .accessibilityLabel("Item name")
                 Picker("Type", selection: $selectedType) {
                     ForEach(FabricItemType.creatableTypes, id: \.self) { t in
                         Text(t.rawValue).tag(t)
@@ -1017,6 +1286,7 @@ struct ActionConfirmationView: View {
                 }
                 .font(.caption2)
                 .labelsHidden()
+                .accessibilityLabel("Item type")
             }
 
         case .assignCapacity:
@@ -1037,12 +1307,14 @@ struct ActionConfirmationView: View {
                 .font(.caption2)
                 .labelsHidden()
                 .onAppear { selectedCapacityID = appState.capacities.first?.id ?? "" }
+                .accessibilityLabel("Select capacity")
             }
 
         case .addRole:
             VStack(spacing: 4) {
                 TextField("Email or object ID", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
+                    .accessibilityLabel("Email or object ID")
                 Picker("Role", selection: $selectedRole) {
                     Text("Admin").tag(WorkspaceRole.admin)
                     Text("Member").tag(WorkspaceRole.member)
@@ -1051,27 +1323,140 @@ struct ActionConfirmationView: View {
                 }
                 .font(.caption2)
                 .labelsHidden()
+                .accessibilityLabel("Role")
             }
 
         case .setLabel:
             TextField("Sensitivity label ID", text: $textInput)
                 .textFieldStyle(.roundedBorder).font(.caption)
+                .accessibilityLabel("Sensitivity label ID")
 
         case .createShortcut:
             VStack(spacing: 4) {
                 TextField("Shortcut name", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
+                    .accessibilityLabel("Shortcut name")
                 TextField("Target path (workspace/item/path)", text: $textInput2)
                     .textFieldStyle(.roundedBorder).font(.caption)
+                    .accessibilityLabel("Target path")
             }
 
         case .loadTable:
             TextField("Relative path to data file", text: $textInput)
                 .textFieldStyle(.roundedBorder).font(.caption)
+                .accessibilityLabel("Relative path to data file")
 
         default:
             EmptyView()
         }
+    }
+}
+
+// MARK: - Onboarding
+
+struct OnboardingView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var currentStep = 0
+
+    private let steps: [(icon: String, title: String, description: String)] = [
+        ("diamond.fill", "Welcome to FabricTray",
+         "A native macOS menu bar companion for Microsoft Fabric. Browse, manage, and monitor — all from your tray."),
+        ("folder.fill", "Browse & Navigate",
+         "Explore workspaces and items with breadcrumb navigation. Search instantly with ⌘F, refresh with ⌘R."),
+        ("play.fill", "Run & Monitor",
+         "Execute notebooks, pipelines, and Spark jobs. Monitor running jobs with live status updates and notifications."),
+        ("star.fill", "Pin Your Favorites",
+         "Right-click any workspace or item to pin it. Favorites appear at the top of your list for quick access."),
+        ("gearshape.fill", "Customize Your View",
+         "Use the S / M / L density picker in the footer to adjust the layout. Adjust notifications with the bell icon.")
+    ]
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Step indicator
+            HStack(spacing: 4) {
+                ForEach(0..<steps.count, id: \.self) { idx in
+                    Circle()
+                        .fill(idx == currentStep ? Palette.accent : Color.primary.opacity(0.15))
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.top, 12)
+
+            // Content
+            VStack(spacing: 8) {
+                Image(systemName: steps[currentStep].icon)
+                    .font(.system(size: 28))
+                    .foregroundStyle(Palette.accent)
+                    .frame(height: 36)
+
+                Text(steps[currentStep].title)
+                    .font(.system(.caption, weight: .semibold))
+                    .multilineTextAlignment(.center)
+
+                Text(steps[currentStep].description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+            }
+            .animation(.easeInOut(duration: 0.2), value: currentStep)
+
+            // Navigation
+            HStack(spacing: 12) {
+                if currentStep > 0 {
+                    Button("Back") {
+                        currentStep -= 1
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.muted)
+                }
+
+                Spacer()
+
+                if currentStep < steps.count - 1 {
+                    Button {
+                        currentStep += 1
+                    } label: {
+                        Text("Next")
+                            .font(.system(.caption2, weight: .medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(Palette.accent)
+                            .foregroundStyle(.white)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        appState.completeOnboarding()
+                    } label: {
+                        Text("Get Started")
+                            .font(.system(.caption2, weight: .medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(Palette.accent)
+                            .foregroundStyle(.white)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            Button("Skip") {
+                appState.completeOnboarding()
+            }
+            .font(.system(size: 10))
+            .buttonStyle(.plain)
+            .foregroundStyle(.quaternary)
+            .padding(.bottom, 8)
+        }
+        .frame(width: 300)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Welcome tour, step \(currentStep + 1) of \(steps.count)")
     }
 }
 

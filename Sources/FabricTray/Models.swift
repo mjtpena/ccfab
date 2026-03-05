@@ -393,16 +393,51 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 struct NavigationPath: Equatable {
     let workspaceID: String?
     let workspaceName: String?
+    let subItemID: String?
+    let subItemName: String?
+    let subItemType: FabricItemType?
+
+    init(workspaceID: String?, workspaceName: String?, subItemID: String? = nil, subItemName: String? = nil, subItemType: FabricItemType? = nil) {
+        self.workspaceID = workspaceID
+        self.workspaceName = workspaceName
+        self.subItemID = subItemID
+        self.subItemName = subItemName
+        self.subItemType = subItemType
+    }
 
     static let root = NavigationPath(workspaceID: nil, workspaceName: nil)
 
     var isRoot: Bool { workspaceID == nil }
+    var isSubItem: Bool { subItemID != nil }
+    var depth: Int { isRoot ? 0 : (isSubItem ? 2 : 1) }
+
+    /// Navigate up one level
+    var parent: NavigationPath {
+        if isSubItem {
+            return NavigationPath(workspaceID: workspaceID, workspaceName: workspaceName)
+        }
+        return .root
+    }
 
     var breadcrumb: String {
         if let name = workspaceName {
+            if let sub = subItemName {
+                return "/ \(name) / \(sub)"
+            }
             return "/ \(name)"
         }
         return "/"
+    }
+
+    var breadcrumbSegments: [(label: String, path: NavigationPath)] {
+        var segments: [(String, NavigationPath)] = [("/", .root)]
+        if let wsName = workspaceName {
+            segments.append((wsName, NavigationPath(workspaceID: workspaceID, workspaceName: workspaceName)))
+        }
+        if let subName = subItemName {
+            segments.append((subName, self))
+        }
+        return segments
     }
 }
 

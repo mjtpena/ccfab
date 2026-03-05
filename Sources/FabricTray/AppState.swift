@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 
@@ -17,9 +18,21 @@ final class AppState: ObservableObject {
     @Published var searchQuery = ""
     @Published var isLoading = false
 
+    // Favorites & Recents
+    @Published var favoriteIDs: Set<String> = []
+    @Published var recentItems: [(id: String, name: String, type: FabricItemType)] = []
+
     var filteredItems: [FabricItem] {
-        guard !searchQuery.isEmpty else { return allItems }
-        return allItems.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
+        let base: [FabricItem]
+        if searchQuery.isEmpty {
+            // Show favorites first, then the rest
+            let favs = allItems.filter { favoriteIDs.contains($0.id) }
+            let rest = allItems.filter { !favoriteIDs.contains($0.id) }
+            base = favs + rest
+        } else {
+            base = allItems.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
+        }
+        return base
     }
 
     // Jobs
@@ -37,9 +50,14 @@ final class AppState: ObservableObject {
     @Published var errorMessage: String?
     @Published var toastMessage: String?
     @Published var lastRefreshTime: Date?
+    @Published var lastFailedAction: (() async -> Void)?
 
     // Confirmation workflow
     @Published var pendingAction: PendingAction?
+    @Published var pendingActionItemID: String?
+
+    // Onboarding
+    @Published var hasCompletedOnboarding: Bool
 
     // Notifications
     @Published var notificationsEnabled = true
@@ -59,11 +77,19 @@ final class AppState: ObservableObject {
     private var previousJobStatuses: [String: JobRunStatus] = [:]
 
     init() {
+        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
         Task { @MainActor [weak self] in
             self?.setupNotifications()
             self?.restoreSession()
             self?.notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
+            self?.loadFavorites()
+            self?.loadRecents()
         }
+    }
+
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
     }
 
     // MARK: - Auth
@@ -118,12 +144,19 @@ final class AppState: ObservableObject {
     }
 
     func navigateUp() async {
-        await navigate(to: .root)
+        await navigate(to: currentPath.parent)
     }
 
     func enter(item: FabricItem) async {
         if item.type == .workspace {
+            addRecent(id: item.id, name: item.name, type: item.type)
             await navigate(to: NavigationPath(workspaceID: item.id, workspaceName: item.name))
+        } else if item.type == .lakehouse, let wsID = currentPath.workspaceID {
+            addRecent(id: item.id, name: item.name, type: item.type)
+            await navigate(to: NavigationPath(
+                workspaceID: wsID, workspaceName: currentPath.workspaceName,
+                subItemID: item.id, subItemName: item.name, subItemType: item.type
+            ))
         }
     }
 
@@ -132,19 +165,47 @@ final class AppState: ObservableObject {
 
         isLoading = true
         errorMessage = nil
+        lastFailedAction = nil
         defer { isLoading = false }
 
         do {
             if currentPath.isRoot {
                 allItems = try await api.listWorkspaces(accessToken: token.accessToken)
                 Task { await enrichWorkspaces() }
+            } else if let wsID = currentPath.workspaceID, currentPath.isSubItem {
+                // Sub-item level (e.g., lakehouse tables)
+                if let lhID = currentPath.subItemID, currentPath.subItemType == .lakehouse {
+                    let rawTables = try await api.listTables(workspaceID: wsID, lakehouseID: lhID, accessToken: token.accessToken)
+                    allItems = rawTables.compactMap { dict -> FabricItem? in
+                        guard let name = dict["name"] as? String else { return nil }
+                        let tblType = dict["type"] as? String ?? ""
+                        return FabricItem(
+                            id: "\(lhID)_\(name)",
+                            name: name,
+                            type: .unknown,
+                            workspaceID: wsID,
+                            role: nil,
+                            capacityId: nil,
+                            capacity: nil,
+                            sensitivityLabel: nil
+                        )
+                    }
+                }
+                Task { await fetchJobs() }
             } else if let wsID = currentPath.workspaceID {
                 allItems = try await api.listItems(workspaceID: wsID, accessToken: token.accessToken)
                 Task { await fetchJobs() }
             }
             lastRefreshTime = Date()
         } catch {
+            lastFailedAction = { [weak self] in await self?.refresh() ?? () }
             showError(error.localizedDescription)
+        }
+    }
+
+    func retryLastAction() async {
+        if let action = lastFailedAction {
+            await action()
         }
     }
 
@@ -561,22 +622,30 @@ final class AppState: ObservableObject {
     }
 
     private func showError(_ message: String) {
-        errorMessage = message
+        withAnimation(.easeInOut(duration: 0.25)) {
+            errorMessage = message
+        }
         errorDismissTask?.cancel()
         errorDismissTask = Task {
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             guard !Task.isCancelled else { return }
-            if self.errorMessage == message { self.errorMessage = nil }
+            if self.errorMessage == message {
+                withAnimation(.easeInOut(duration: 0.25)) { self.errorMessage = nil }
+            }
         }
     }
 
     private func showToast(_ message: String) {
-        toastMessage = message
+        withAnimation(.easeInOut(duration: 0.25)) {
+            toastMessage = message
+        }
         toastDismissTask?.cancel()
         toastDismissTask = Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
-            if self.toastMessage == message { self.toastMessage = nil }
+            if self.toastMessage == message {
+                withAnimation(.easeInOut(duration: 0.25)) { self.toastMessage = nil }
+            }
         }
     }
 
@@ -661,6 +730,55 @@ final class AppState: ObservableObject {
                 if let role = role { result[wsId] = role }
             }
             return result
+        }
+    }
+
+    // MARK: - Favorites
+
+    func toggleFavorite(_ itemID: String) {
+        if favoriteIDs.contains(itemID) {
+            favoriteIDs.remove(itemID)
+        } else {
+            favoriteIDs.insert(itemID)
+        }
+        saveFavorites()
+    }
+
+    func isFavorite(_ itemID: String) -> Bool {
+        favoriteIDs.contains(itemID)
+    }
+
+    private func loadFavorites() {
+        let stored = UserDefaults.standard.stringArray(forKey: "favoriteItemIDs") ?? []
+        favoriteIDs = Set(stored)
+    }
+
+    private func saveFavorites() {
+        UserDefaults.standard.set(Array(favoriteIDs), forKey: "favoriteItemIDs")
+    }
+
+    // MARK: - Recents
+
+    private func addRecent(id: String, name: String, type: FabricItemType) {
+        recentItems.removeAll { $0.id == id }
+        recentItems.insert((id: id, name: name, type: type), at: 0)
+        if recentItems.count > 5 { recentItems = Array(recentItems.prefix(5)) }
+        saveRecents()
+    }
+
+    private func loadRecents() {
+        guard let data = UserDefaults.standard.data(forKey: "recentItems"),
+              let decoded = try? JSONDecoder().decode([[String: String]].self, from: data) else { return }
+        recentItems = decoded.compactMap { dict in
+            guard let id = dict["id"], let name = dict["name"], let typeRaw = dict["type"] else { return nil }
+            return (id: id, name: name, type: FabricItemType.from(typeRaw))
+        }
+    }
+
+    private func saveRecents() {
+        let encoded = recentItems.map { ["id": $0.id, "name": $0.name, "type": $0.type.rawValue] }
+        if let data = try? JSONEncoder().encode(encoded) {
+            UserDefaults.standard.set(data, forKey: "recentItems")
         }
     }
 }

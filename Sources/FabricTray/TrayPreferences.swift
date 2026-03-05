@@ -17,12 +17,13 @@ enum TrayDensity: String, CaseIterable, Identifiable {
     }
 
     var windowWidth: CGFloat { floor(360 * scale) }
-    var maxListHeight: CGFloat { floor(260 * scale) }
+    var minListHeight: CGFloat { floor(120 * scale) }
+    var maxListHeight: CGFloat { floor(400 * scale) }
     var iconSize: CGFloat { floor(14 * scale) }
     var rowVPad: CGFloat { max(2, floor(4 * scale)) }
     var captionSize: CGFloat { floor(12 * scale) }
-    var smallSize: CGFloat { floor(9 * scale) }
-    var tinySize: CGFloat { floor(8 * scale) }
+    var smallSize: CGFloat { max(9, floor(9 * scale)) }
+    var tinySize: CGFloat { max(9, floor(9 * scale)) }
     var sfSize: CGFloat { floor(9 * scale) }
 }
 
