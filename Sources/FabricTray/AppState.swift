@@ -59,7 +59,14 @@ final class AppState: ObservableObject {
             let key = ws.capacityId ?? ""
             grouped[key, default: []].append(ws)
         }
-        let capMap = Dictionary(uniqueKeysWithValues: capacities.map { ($0.id, $0) })
+        // Build capacity map from both self.capacities AND per-workspace capacity data
+        var capMap: [String: FabricCapacity] = [:]
+        for cap in capacities { capMap[cap.id] = cap }
+        for ws in wsItems {
+            if let capId = ws.capacityId, let cap = ws.capacity, capMap[capId] == nil {
+                capMap[capId] = cap
+            }
+        }
         var result: [(FabricCapacity?, [FabricItem])] = []
 
         // Known capacities first (active then inactive, alphabetical)
@@ -73,7 +80,7 @@ final class AppState: ObservableObject {
             result.append((capMap[key], grouped[key] ?? []))
         }
 
-        // Unknown capacities (have ID but no admin details) — one group per capacity ID
+        // Unknown capacities (have ID but no details at all) — one group per capacity ID
         let unknownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] == nil }.sorted()
         for key in unknownKeys {
             let shortId = String(key.prefix(8))
