@@ -41,6 +41,44 @@ final class AppState: ObservableObject {
 
     // Capacities
     @Published var capacities: [FabricCapacity] = []
+    @Published var viewMode: ViewMode = .workspaceFirst
+
+    /// Total estimated hourly cost across all active capacities (USD).
+    var totalHourlyBurn: Double {
+        capacities.filter(\.isActive).reduce(0) { $0 + $1.hourlyRate }
+    }
+
+    /// Estimated monthly cost across all active capacities (USD).
+    var totalMonthlyEstimate: Double { totalHourlyBurn * 730.0 }
+
+    /// Workspaces grouped by their capacity ID. Unassigned workspaces are under "".
+    var workspacesByCapacity: [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
+        guard currentPath.isRoot else { return [] }
+        let wsItems = allItems.filter { $0.type == .workspace }
+        var grouped: [String: [FabricItem]] = [:]
+        for ws in wsItems {
+            let key = ws.capacityId ?? ""
+            grouped[key, default: []].append(ws)
+        }
+        let capMap = Dictionary(uniqueKeysWithValues: capacities.map { ($0.id, $0) })
+        var result: [(FabricCapacity?, [FabricItem])] = []
+        // Sort: active capacities first (by name), then inactive, then unassigned last
+        let capKeys = grouped.keys.filter { !$0.isEmpty }.sorted { a, b in
+            let capA = capMap[a]
+            let capB = capMap[b]
+            if capA?.isActive != capB?.isActive { return capA?.isActive == true }
+            return (capA?.displayName ?? "") < (capB?.displayName ?? "")
+        }
+        for key in capKeys {
+            result.append((capMap[key], grouped[key] ?? []))
+        }
+        if let unassigned = grouped[""], !unassigned.isEmpty {
+            result.append((nil, unassigned))
+        }
+        return result
+    }
+
+    enum ViewMode: String { case workspaceFirst, capacityFirst }
 
     // ACL / Detail
     @Published var roleAssignments: [RoleAssignment] = []
@@ -78,6 +116,10 @@ final class AppState: ObservableObject {
 
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        if let mode = UserDefaults.standard.string(forKey: "viewMode"),
+           let m = ViewMode(rawValue: mode) {
+            viewMode = m
+        }
         Task { @MainActor [weak self] in
             self?.setupNotifications()
             self?.restoreSession()
@@ -90,6 +132,11 @@ final class AppState: ObservableObject {
     func completeOnboarding() {
         hasCompletedOnboarding = true
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+    }
+
+    func toggleViewMode() {
+        viewMode = viewMode == .workspaceFirst ? .capacityFirst : .workspaceFirst
+        UserDefaults.standard.set(viewMode.rawValue, forKey: "viewMode")
     }
 
     // MARK: - Auth
@@ -150,14 +197,23 @@ final class AppState: ObservableObject {
     func enter(item: FabricItem) async {
         if item.type == .workspace {
             addRecent(id: item.id, name: item.name, type: item.type)
-            await navigate(to: NavigationPath(workspaceID: item.id, workspaceName: item.name))
+            await navigate(to: NavigationPath(
+                capacityID: currentPath.capacityID, capacityName: currentPath.capacityName,
+                workspaceID: item.id, workspaceName: item.name
+            ))
         } else if item.type == .lakehouse, let wsID = currentPath.workspaceID {
             addRecent(id: item.id, name: item.name, type: item.type)
             await navigate(to: NavigationPath(
+                capacityID: currentPath.capacityID, capacityName: currentPath.capacityName,
                 workspaceID: wsID, workspaceName: currentPath.workspaceName,
                 subItemID: item.id, subItemName: item.name, subItemType: item.type
             ))
         }
+    }
+
+    /// Enter a capacity-scoped view showing its workspaces.
+    func enterCapacity(_ cap: FabricCapacity) async {
+        await navigate(to: .capacity(id: cap.id, name: cap.displayName))
     }
 
     func refresh() async {
@@ -169,7 +225,12 @@ final class AppState: ObservableObject {
         defer { isLoading = false }
 
         do {
-            if currentPath.isRoot {
+            if currentPath.isCapacityLevel {
+                // Show workspaces assigned to this capacity
+                let allWS = try await api.listWorkspaces(accessToken: token.accessToken)
+                allItems = allWS.filter { $0.capacityId == currentPath.capacityID }
+                Task { await enrichWorkspaces() }
+            } else if currentPath.isRoot {
                 allItems = try await api.listWorkspaces(accessToken: token.accessToken)
                 Task { await enrichWorkspaces() }
             } else if let wsID = currentPath.workspaceID, currentPath.isSubItem {

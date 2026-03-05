@@ -76,22 +76,35 @@ struct TrayView: View {
                 Divider().opacity(0.5)
 
                 if appState.isSignedIn {
-                    // Recent items (root only, when not searching)
-                    if appState.currentPath.isRoot && appState.searchQuery.isEmpty && !appState.recentItems.isEmpty {
-                        recentsSection
-                        Divider().opacity(0.5)
-                    }
+                    // Capacity-first view: show capacity dashboard at root
+                    if appState.viewMode == .capacityFirst && (appState.currentPath.isRoot || appState.currentPath.isCapacityLevel) && appState.currentPath.workspaceID == nil {
+                        if !appState.capacities.isEmpty {
+                            capacitySpendBar
+                            Divider().opacity(0.5)
+                        }
+                        if appState.currentPath.isCapacityLevel {
+                            itemList
+                        } else {
+                            capacityFirstList
+                        }
+                    } else {
+                        // Workspace-first view (default)
+                        if appState.currentPath.isRoot && appState.searchQuery.isEmpty && !appState.recentItems.isEmpty {
+                            recentsSection
+                            Divider().opacity(0.5)
+                        }
 
-                    itemList
+                        itemList
 
-                    if !appState.currentPath.isRoot {
-                        Divider().opacity(0.5)
-                        jobsSection
-                    }
+                        if !appState.currentPath.isRoot && !appState.currentPath.isCapacityLevel {
+                            Divider().opacity(0.5)
+                            jobsSection
+                        }
 
-                    if appState.currentPath.isRoot && !appState.capacities.isEmpty {
-                        Divider().opacity(0.5)
-                        capacitiesSection
+                        if appState.currentPath.isRoot && !appState.capacities.isEmpty {
+                            Divider().opacity(0.5)
+                            capacitiesSection
+                        }
                     }
                 } else {
                     signedOutPlaceholder
@@ -205,6 +218,20 @@ struct TrayView: View {
 
             // Actions with keyboard shortcuts
             if appState.isSignedIn {
+                // View mode toggle (workspace-first vs capacity-first)
+                if !appState.capacities.isEmpty && appState.currentPath.isRoot {
+                    Button {
+                        appState.toggleViewMode()
+                    } label: {
+                        Image(systemName: appState.viewMode == .capacityFirst ? "cpu" : "folder")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.accent)
+                    .help(appState.viewMode == .capacityFirst ? "Switch to workspace view" : "Switch to capacity view")
+                    .accessibilityLabel("Toggle view mode")
+                }
+
                 Button {
                     if appState.currentPath.isRoot {
                         appState.requestCreateWorkspace()
@@ -500,6 +527,16 @@ struct TrayView: View {
                     .foregroundStyle(.quaternary)
                     .accessibilityLabel("\(appState.filteredItems.count) items")
 
+                if appState.totalHourlyBurn > 0 && appState.viewMode == .workspaceFirst {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.quaternary)
+                    Text("~\(formatCost(appState.totalHourlyBurn))/hr")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(spendColor(appState.totalHourlyBurn))
+                        .help("Estimated total hourly burn across all active capacities")
+                }
+
                 if let time = appState.lastRefreshTime {
                     Text("·")
                         .font(.system(size: 9))
@@ -645,35 +682,18 @@ struct TrayView: View {
         .accessibilityLabel("Jobs section")
     }
 
-    // MARK: - Capacities Section
+    // MARK: - Capacities Section (workspace-first mode)
 
     private var capacitiesSection: some View {
         DisclosureGroup(isExpanded: $showCapacities) {
             VStack(spacing: 0) {
                 ForEach(appState.capacities, id: \.id) { cap in
-                    HStack(spacing: 6) {
-                        Text(cap.sku)
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
-                        Text(cap.displayName)
-                            .font(.caption2)
-                            .lineLimit(1)
-                        Spacer()
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(cap.isActive ? Palette.success : Palette.destructive)
-                                .frame(width: 5, height: 5)
-                            Text(cap.isActive ? cap.region : "Paused")
-                                .font(.system(size: 9))
-                                .foregroundStyle(cap.isActive ? Color.secondary : Palette.destructive)
-                        }
+                    Button {
+                        Task { await appState.enterCapacity(cap) }
+                    } label: {
+                        capacityRow(cap)
                     }
-                    .padding(.vertical, 2)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(cap.displayName), \(cap.sku), \(cap.isActive ? cap.region : "Paused")")
+                    .buttonStyle(.plain)
                 }
             }
         } label: {
@@ -687,6 +707,12 @@ struct TrayView: View {
                 Text("\(appState.capacities.count)")
                     .font(.system(size: 9))
                     .foregroundStyle(.quaternary)
+                Spacer()
+                if appState.totalHourlyBurn > 0 {
+                    Text("~\(formatCost(appState.totalHourlyBurn))/hr")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(spendColor(appState.totalHourlyBurn))
+                }
                 let paused = appState.capacities.filter { !$0.isActive }.count
                 if paused > 0 {
                     Text("\(paused) paused")
@@ -702,6 +728,215 @@ struct TrayView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .accessibilityLabel("Capacities section")
+    }
+
+    // MARK: - Capacity Spend Bar
+
+    private var capacitySpendBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "dollarsign.gauge.chart.lefthalf.righthalf")
+                .font(.system(size: 10))
+                .foregroundStyle(spendColor(appState.totalHourlyBurn))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Estimated Burn Rate")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text("\(formatCost(appState.totalHourlyBurn))/hr")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(spendColor(appState.totalHourlyBurn))
+                    Text("≈ \(formatCost(appState.totalMonthlyEstimate))/mo")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            let active = appState.capacities.filter(\.isActive).count
+            let total = appState.capacities.count
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("\(active)/\(total) active")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                let totalCU = appState.capacities.filter(\.isActive).reduce(0) { $0 + $1.capacityUnits }
+                Text("\(totalCU) CU")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.accent)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Palette.sectionBG)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Estimated burn rate \(formatCost(appState.totalHourlyBurn)) per hour")
+    }
+
+    // MARK: - Capacity-First List
+
+    private var capacityFirstList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(appState.capacities, id: \.id) { cap in
+                    let wsCount = appState.allItems.filter { $0.capacityId == cap.id && $0.type == .workspace }.count
+                    Button {
+                        Task { await appState.enterCapacity(cap) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 6) {
+                                // SKU badge
+                                Text(cap.sku)
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(cap.displayName)
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                        .lineLimit(1)
+                                    HStack(spacing: 4) {
+                                        Text("\(cap.capacityUnits) CU")
+                                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(Palette.accent)
+                                        Text("·")
+                                            .foregroundStyle(.quaternary)
+                                        Text(cap.region)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                        Text("·")
+                                            .foregroundStyle(.quaternary)
+                                        Text("\(wsCount) workspace\(wsCount == 1 ? "" : "s")")
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 1) {
+                                    // Status dot + cost
+                                    HStack(spacing: 3) {
+                                        Circle()
+                                            .fill(cap.isActive ? Palette.success : Palette.destructive)
+                                            .frame(width: 6, height: 6)
+                                        Text(cap.isActive ? "Active" : "Paused")
+                                            .font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(cap.isActive ? Palette.success : Palette.destructive)
+                                    }
+                                    if cap.isActive && cap.hourlyRate > 0 {
+                                        Text("\(formatCost(cap.hourlyRate))/hr")
+                                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(spendColor(cap.hourlyRate))
+                                    } else if !cap.isActive {
+                                        Text("$0/hr")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(.quaternary)
+                            }
+                            // Mini spend gauge
+                            if cap.isActive && cap.hourlyRate > 0 {
+                                let maxRate = appState.capacities.map(\.hourlyRate).max() ?? 1
+                                GeometryReader { geo in
+                                    RoundedRectangle(cornerRadius: 1.5)
+                                        .fill(spendColor(cap.hourlyRate).opacity(0.3))
+                                        .frame(width: geo.size.width * CGFloat(cap.hourlyRate / maxRate), height: 3)
+                                }
+                                .frame(height: 3)
+                                .padding(.top, 4)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.clear)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(cap.displayName), \(cap.sku), \(cap.capacityUnits) capacity units, \(cap.isActive ? "active" : "paused"), \(wsCount) workspaces")
+                    Divider().opacity(0.3).padding(.horizontal, 10)
+                }
+
+                // Unassigned workspaces
+                let unassigned = appState.allItems.filter { $0.type == .workspace && $0.capacityId == nil }
+                if !unassigned.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        Text("No Capacity")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(unassigned.count) workspace\(unassigned.count == 1 ? "" : "s")")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.quaternary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .frame(maxHeight: prefs.density.maxListHeight)
+    }
+
+    private func capacityRow(_ cap: FabricCapacity) -> some View {
+        HStack(spacing: 6) {
+            Text(cap.sku)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
+            Text(cap.displayName)
+                .font(.caption2)
+                .lineLimit(1)
+            Text("\(cap.capacityUnits) CU")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(Palette.accent)
+            Spacer()
+            if cap.isActive && cap.hourlyRate > 0 {
+                Text("\(formatCost(cap.hourlyRate))/hr")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(spendColor(cap.hourlyRate))
+            }
+            HStack(spacing: 3) {
+                Circle()
+                    .fill(cap.isActive ? Palette.success : Palette.destructive)
+                    .frame(width: 5, height: 5)
+                Text(cap.isActive ? cap.region : "Paused")
+                    .font(.system(size: 9))
+                    .foregroundStyle(cap.isActive ? Color.secondary : Palette.destructive)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 7))
+                .foregroundStyle(.quaternary)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(cap.displayName), \(cap.sku), \(cap.capacityUnits) CU, \(cap.isActive ? cap.region : "Paused")")
+    }
+
+    // MARK: - Cost Formatting
+
+    private func formatCost(_ amount: Double) -> String {
+        if amount >= 1000 {
+            return String(format: "$%.0f", amount)
+        } else if amount >= 1 {
+            return String(format: "$%.2f", amount)
+        } else {
+            return String(format: "$%.2f", amount)
+        }
+    }
+
+    private func spendColor(_ hourlyRate: Double) -> Color {
+        if hourlyRate <= 0 { return .secondary }
+        if hourlyRate < 5 { return Palette.success }
+        if hourlyRate < 20 { return Palette.warning }
+        return Palette.destructive
     }
 
     private func jobStatusColor(_ status: JobRunStatus) -> Color {

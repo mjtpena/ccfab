@@ -273,6 +273,61 @@ struct FabricCapacity: Hashable {
     }
 
     var isActive: Bool { state == "Active" }
+
+    // MARK: - Capacity Units & Pricing
+
+    /// Number of Capacity Units for this SKU.
+    var capacityUnits: Int { CapacityPricing.capacityUnits(for: sku) }
+
+    /// Estimated hourly cost (USD, pay-as-you-go) when active.
+    var hourlyRate: Double { CapacityPricing.hourlyRate(for: sku) }
+
+    /// Estimated monthly cost (USD) assuming 730 hours.
+    var monthlyEstimate: Double { hourlyRate * 730.0 }
+}
+
+/// Pricing reference for Fabric capacity SKUs (pay-as-you-go, USD).
+enum CapacityPricing {
+    /// Maps a SKU string to its Capacity Unit count.
+    static func capacityUnits(for sku: String) -> Int {
+        let upper = sku.uppercased()
+        // F-series: number suffix IS the CU count (F2=2, F64=64, F2048=2048)
+        if upper.hasPrefix("FT") || upper.hasPrefix("F") {
+            let prefix = upper.hasPrefix("FT") ? "FT" : "F"
+            if let n = Int(upper.dropFirst(prefix.count)), n > 0 { return n }
+        }
+        // Premium SKUs
+        if let cu = premiumCUMap[upper] { return cu }
+        // Embedded SKUs
+        if let cu = embeddedCUMap[upper] { return cu }
+        // Azure A-series
+        if upper.hasPrefix("A") {
+            if let n = Int(upper.dropFirst(1)), n > 0 { return n * 2 }
+        }
+        return 0
+    }
+
+    /// Estimated hourly rate (USD) for a given SKU.
+    static func hourlyRate(for sku: String) -> Double {
+        let cu = capacityUnits(for: sku)
+        guard cu > 0 else { return 0 }
+        let upper = sku.uppercased()
+        // Trial capacities are free
+        if upper.hasPrefix("FT") { return 0 }
+        // F-series base rate: ~$0.18/CU/hr
+        return Double(cu) * perCUHourlyRate
+    }
+
+    /// Base pay-as-you-go rate per CU per hour (USD).
+    static let perCUHourlyRate: Double = 0.18
+
+    private static let premiumCUMap: [String: Int] = [
+        "P1": 8, "P2": 16, "P3": 32, "P4": 64, "P5": 128,
+    ]
+
+    private static let embeddedCUMap: [String: Int] = [
+        "EM1": 2, "EM2": 4, "EM3": 8,
+    ]
 }
 
 struct SensitivityLabel: Hashable {
@@ -391,13 +446,21 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 // MARK: - Navigation
 
 struct NavigationPath: Equatable {
+    let capacityID: String?
+    let capacityName: String?
     let workspaceID: String?
     let workspaceName: String?
     let subItemID: String?
     let subItemName: String?
     let subItemType: FabricItemType?
 
-    init(workspaceID: String?, workspaceName: String?, subItemID: String? = nil, subItemName: String? = nil, subItemType: FabricItemType? = nil) {
+    init(
+        capacityID: String? = nil, capacityName: String? = nil,
+        workspaceID: String?, workspaceName: String?,
+        subItemID: String? = nil, subItemName: String? = nil, subItemType: FabricItemType? = nil
+    ) {
+        self.capacityID = capacityID
+        self.capacityName = capacityName
         self.workspaceID = workspaceID
         self.workspaceName = workspaceName
         self.subItemID = subItemID
@@ -407,32 +470,54 @@ struct NavigationPath: Equatable {
 
     static let root = NavigationPath(workspaceID: nil, workspaceName: nil)
 
-    var isRoot: Bool { workspaceID == nil }
+    /// Capacity-level path (shows workspaces for a specific capacity).
+    static func capacity(id: String, name: String) -> NavigationPath {
+        NavigationPath(capacityID: id, capacityName: name, workspaceID: nil, workspaceName: nil)
+    }
+
+    var isRoot: Bool { workspaceID == nil && capacityID == nil }
+    var isCapacityLevel: Bool { capacityID != nil && workspaceID == nil }
     var isSubItem: Bool { subItemID != nil }
-    var depth: Int { isRoot ? 0 : (isSubItem ? 2 : 1) }
+    var depth: Int {
+        if isRoot { return 0 }
+        if isCapacityLevel { return 1 }
+        if isSubItem { return capacityID != nil ? 3 : 2 }
+        return capacityID != nil ? 2 : 1
+    }
 
     /// Navigate up one level
     var parent: NavigationPath {
         if isSubItem {
-            return NavigationPath(workspaceID: workspaceID, workspaceName: workspaceName)
+            return NavigationPath(
+                capacityID: capacityID, capacityName: capacityName,
+                workspaceID: workspaceID, workspaceName: workspaceName
+            )
+        }
+        if workspaceID != nil, let capID = capacityID {
+            return .capacity(id: capID, name: capacityName ?? "")
         }
         return .root
     }
 
     var breadcrumb: String {
-        if let name = workspaceName {
-            if let sub = subItemName {
-                return "/ \(name) / \(sub)"
-            }
-            return "/ \(name)"
-        }
-        return "/"
+        var parts: [String] = []
+        if let cap = capacityName { parts.append(cap) }
+        if let ws = workspaceName { parts.append(ws) }
+        if let sub = subItemName { parts.append(sub) }
+        if parts.isEmpty { return "/" }
+        return "/ " + parts.joined(separator: " / ")
     }
 
     var breadcrumbSegments: [(label: String, path: NavigationPath)] {
         var segments: [(String, NavigationPath)] = [("/", .root)]
+        if let capName = capacityName, let capID = capacityID {
+            segments.append((capName, .capacity(id: capID, name: capName)))
+        }
         if let wsName = workspaceName {
-            segments.append((wsName, NavigationPath(workspaceID: workspaceID, workspaceName: workspaceName)))
+            segments.append((wsName, NavigationPath(
+                capacityID: capacityID, capacityName: capacityName,
+                workspaceID: workspaceID, workspaceName: workspaceName
+            )))
         }
         if let subName = subItemName {
             segments.append((subName, self))

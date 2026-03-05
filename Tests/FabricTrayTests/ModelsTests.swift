@@ -255,4 +255,103 @@ final class ModelsTests: XCTestCase {
         XCTAssertNotEqual(TrayStatus.running(count: 1), TrayStatus.running(count: 2))
         XCTAssertNotEqual(TrayStatus.idle, TrayStatus.attention)
     }
+
+    // MARK: - Capacity Pricing
+
+    func testCapacityUnitsFSeries() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F2"), 2)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F4"), 4)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F8"), 8)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F16"), 16)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F32"), 32)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F64"), 64)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F128"), 128)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F256"), 256)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F512"), 512)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F1024"), 1024)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "F2048"), 2048)
+    }
+
+    func testCapacityUnitsTrialSKU() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "FT1"), 1)
+    }
+
+    func testCapacityUnitsPremium() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "P1"), 8)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "P2"), 16)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "P3"), 32)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "P4"), 64)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "P5"), 128)
+    }
+
+    func testCapacityUnitsEmbedded() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "EM1"), 2)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "EM2"), 4)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "EM3"), 8)
+    }
+
+    func testCapacityUnitsUnknownSKU() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "X99"), 0)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: ""), 0)
+    }
+
+    func testCapacityUnitsCaseInsensitive() {
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "f64"), 64)
+        XCTAssertEqual(CapacityPricing.capacityUnits(for: "p1"), 8)
+    }
+
+    func testHourlyRateFSeries() {
+        let rate = CapacityPricing.hourlyRate(for: "F64")
+        XCTAssertEqual(rate, 64 * 0.18, accuracy: 0.001)
+    }
+
+    func testHourlyRateTrialIsFree() {
+        XCTAssertEqual(CapacityPricing.hourlyRate(for: "FT1"), 0)
+    }
+
+    func testHourlyRateUnknownIsZero() {
+        XCTAssertEqual(CapacityPricing.hourlyRate(for: ""), 0)
+    }
+
+    func testFabricCapacityComputedPricing() {
+        let cap = FabricCapacity(id: "c1", displayName: "Dev", sku: "F16", region: "eastus", state: "Active")
+        XCTAssertEqual(cap.capacityUnits, 16)
+        XCTAssertEqual(cap.hourlyRate, 16 * 0.18, accuracy: 0.001)
+        XCTAssertEqual(cap.monthlyEstimate, cap.hourlyRate * 730, accuracy: 0.01)
+    }
+
+    // MARK: - Navigation Path (capacity level)
+
+    func testNavigationPathCapacityLevel() {
+        let path = NavigationPath.capacity(id: "cap-1", name: "Production")
+        XCTAssertTrue(path.isCapacityLevel)
+        XCTAssertFalse(path.isRoot)
+        XCTAssertEqual(path.depth, 1)
+        XCTAssertEqual(path.breadcrumb, "/ Production")
+        XCTAssertEqual(path.parent, .root)
+    }
+
+    func testNavigationPathCapacityToWorkspace() {
+        let path = NavigationPath(
+            capacityID: "cap-1", capacityName: "Production",
+            workspaceID: "ws-1", workspaceName: "Analytics"
+        )
+        XCTAssertFalse(path.isCapacityLevel)
+        XCTAssertFalse(path.isRoot)
+        XCTAssertEqual(path.depth, 2)
+        XCTAssertEqual(path.breadcrumb, "/ Production / Analytics")
+        XCTAssertEqual(path.parent, .capacity(id: "cap-1", name: "Production"))
+    }
+
+    func testBreadcrumbSegmentsWithCapacity() {
+        let path = NavigationPath(
+            capacityID: "cap-1", capacityName: "Prod",
+            workspaceID: "ws-1", workspaceName: "Analytics"
+        )
+        let segments = path.breadcrumbSegments
+        XCTAssertEqual(segments.count, 3)
+        XCTAssertEqual(segments[0].label, "/")
+        XCTAssertEqual(segments[1].label, "Prod")
+        XCTAssertEqual(segments[2].label, "Analytics")
+    }
 }
