@@ -3,12 +3,12 @@ import Foundation
 enum AppDefaults {
     static let tenantID = sanitized(
         ProcessInfo.processInfo.environment["FABRIC_TRAY_TENANT_ID"],
-        fallback: "organizations"
+        fallback: "4b7e9d9f-8e54-43da-a1dd-2d1cc793721a"
     )
 
     static let clientID = sanitized(
         ProcessInfo.processInfo.environment["FABRIC_TRAY_CLIENT_ID"],
-        fallback: "3e377a6d-020e-47c0-a652-ef26154d5770"
+        fallback: "5c510dab-9dc3-4be3-ab81-8f6243dc1597"
     )
 
     private static func sanitized(_ value: String?, fallback: String) -> String {
