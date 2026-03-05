@@ -41,15 +41,27 @@ final class FabricAPIClient: @unchecked Sendable {
         var map: [String: FabricCapacity] = [:]
         for obj in objects {
             guard let id = obj["id"] as? String else { continue }
-            map[id] = FabricCapacity(
-                id: id,
-                displayName: (obj["displayName"] as? String) ?? "",
-                sku: (obj["sku"] as? String) ?? "",
-                region: (obj["region"] as? String) ?? "",
-                state: (obj["state"] as? String) ?? ""
-            )
+            map[id] = parseCapacity(obj)
         }
         return map
+    }
+
+    /// Fetch a single capacity by ID (works for contributors, not just admins).
+    func getCapacity(id: String, accessToken: String) async throws -> FabricCapacity? {
+        let data = try await get(path: "v1/capacities/\(id)", accessToken: accessToken)
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return parseCapacity(obj)
+    }
+
+    private func parseCapacity(_ obj: [String: Any]) -> FabricCapacity? {
+        guard let id = obj["id"] as? String else { return nil }
+        return FabricCapacity(
+            id: id,
+            displayName: (obj["displayName"] as? String) ?? "",
+            sku: (obj["sku"] as? String) ?? "",
+            region: (obj["region"] as? String) ?? "",
+            state: (obj["state"] as? String) ?? ""
+        )
     }
 
     // MARK: - Items in workspace

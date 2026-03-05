@@ -755,8 +755,27 @@ final class AppState: ObservableObject {
             await self.fetchRolesMap(accessToken: accessToken)
         }()
 
-        let capsMap = await capsTask
+        var capsMap = await capsTask
         let roles = await rolesTask
+
+        // Try to fetch details for capacity IDs not returned by the list endpoint
+        let unknownCapIds = Set(
+            allItems.compactMap { $0.capacityId }.filter { !$0.isEmpty && capsMap[$0] == nil }
+        )
+        if !unknownCapIds.isEmpty {
+            let apiClient = api
+            await withTaskGroup(of: (String, FabricCapacity?).self) { group in
+                for capId in unknownCapIds {
+                    group.addTask {
+                        let cap = try? await apiClient.getCapacity(id: capId, accessToken: accessToken)
+                        return (capId, cap)
+                    }
+                }
+                for await (capId, cap) in group {
+                    if let cap = cap { capsMap[capId] = cap }
+                }
+            }
+        }
 
         self.capacities = Array(capsMap.values).sorted { $0.displayName < $1.displayName }
 
