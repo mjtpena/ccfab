@@ -785,10 +785,10 @@ struct TrayView: View {
                         .padding(.vertical, 2)
                         .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
                 } else {
-                    // Placeholder icon (unknown capacity — no admin access)
-                    Image(systemName: "cpu")
+                    // Placeholder badge (unknown capacity — no admin access)
+                    Image(systemName: "lock.shield")
                         .font(.system(size: 10))
-                        .foregroundStyle(Palette.accent)
+                        .foregroundStyle(.orange)
                         .frame(width: 14)
                 }
                 VStack(alignment: .leading, spacing: 1) {
@@ -811,7 +811,7 @@ struct TrayView: View {
                                 .foregroundStyle(.secondary)
                         }
                         if cap.sku.isEmpty {
-                            Text("\(workspaceCount) workspace\(workspaceCount == 1 ? "" : "s")")
+                            Text("Admin access required for details")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
                         }
@@ -862,23 +862,28 @@ struct TrayView: View {
     /// Header for workspaces with no capacity assigned.
     private func noCapacityGroupHeader(workspaceCount: Int) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "tray")
+            Image(systemName: "square.stack.3d.up")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .frame(width: 14)
-            Text("No Capacity")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Shared Capacity")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text("Managed by your organization")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+            }
             Spacer()
-            Text("\(workspaceCount) workspace\(workspaceCount == 1 ? "" : "s")")
-                .font(.system(size: 9))
+            Text("\(workspaceCount)")
+                .font(.system(size: 9, weight: .medium, design: .rounded))
                 .foregroundStyle(.quaternary)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Palette.sectionBG)
-        .accessibilityLabel("No capacity, \(workspaceCount) workspaces")
+        .accessibilityLabel("Shared capacity, \(workspaceCount) workspaces")
     }
 
     // MARK: - Cost Formatting

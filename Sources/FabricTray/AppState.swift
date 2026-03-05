@@ -73,19 +73,15 @@ final class AppState: ObservableObject {
             result.append((capMap[key], grouped[key] ?? []))
         }
 
-        // Unknown capacities (have ID but no admin details) — create placeholder
+        // Unknown capacities (have ID but no admin details) — one group per capacity ID
         let unknownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] == nil }.sorted()
-        if !unknownKeys.isEmpty {
-            var unknownWS: [FabricItem] = []
-            for key in unknownKeys {
-                unknownWS.append(contentsOf: grouped[key] ?? [])
-            }
-            // Use a placeholder capacity to indicate "on capacity but details unavailable"
+        for key in unknownKeys {
+            let shortId = String(key.prefix(8))
             let placeholder = FabricCapacity(
-                id: "_unknown", displayName: "Capacity", sku: "",
+                id: key, displayName: "Capacity (\(shortId)…)", sku: "",
                 region: "", state: "Active"
             )
-            result.append((placeholder, unknownWS))
+            result.append((placeholder, grouped[key] ?? []))
         }
 
         // No capacity
