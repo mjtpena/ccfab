@@ -39,21 +39,24 @@ private struct ShimmerModifier: ViewModifier {
 }
 
 private struct SkeletonRow: View {
+    @EnvironmentObject private var prefs: TrayPreferences
+
     var body: some View {
-        HStack(spacing: 8) {
+        let d = prefs.density
+        HStack(spacing: d.spacingLG) {
             RoundedRectangle(cornerRadius: 3)
                 .fill(Color.primary.opacity(0.06))
-                .frame(width: 14, height: 14)
+                .frame(width: d.iconSize, height: d.iconSize)
             RoundedRectangle(cornerRadius: 3)
                 .fill(Color.primary.opacity(0.06))
-                .frame(width: CGFloat.random(in: 80...160), height: 10)
+                .frame(width: CGFloat.random(in: d.skeletonTextW), height: d.skeletonTextH)
             Spacer()
             RoundedRectangle(cornerRadius: 3)
                 .fill(Color.primary.opacity(0.04))
-                .frame(width: 40, height: 8)
+                .frame(width: d.skeletonBarW, height: d.skeletonBarH)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padXS)
         .modifier(ShimmerModifier())
     }
 }
@@ -113,14 +116,15 @@ struct TrayView: View {
     // MARK: - Header
 
     private var headerBar: some View {
-        HStack(spacing: 6) {
+        let d = prefs.density
+        return HStack(spacing: d.padSM) {
             // Breadcrumb navigation (supports 3 levels)
-            HStack(spacing: 2) {
+            HStack(spacing: d.spacingXS) {
                 let segments = appState.currentPath.breadcrumbSegments
                 ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                     if index > 0 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 7, weight: .bold))
+                            .font(.system(size: d.fontNano, weight: .bold))
                             .foregroundStyle(.quaternary)
                     }
                     if index == 0 {
@@ -128,7 +132,7 @@ struct TrayView: View {
                             Task { await appState.navigate(to: .root) }
                         } label: {
                             Image(systemName: "house.fill")
-                                .font(.system(size: 10))
+                                .font(.system(size: d.fontBody))
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(appState.currentPath.isRoot ? Palette.muted : Palette.accent)
@@ -144,7 +148,7 @@ struct TrayView: View {
                                 .fontWeight(.semibold)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                                .frame(maxWidth: 90)
+                                .frame(maxWidth: d.breadcrumbMaxW)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Palette.accent)
@@ -155,16 +159,16 @@ struct TrayView: View {
                             .fontWeight(.semibold)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .frame(maxWidth: 90)
+                            .frame(maxWidth: d.breadcrumbMaxW)
                     }
                 }
             }
 
             if appState.isSignedIn {
                 // Search field
-                HStack(spacing: 4) {
+                HStack(spacing: d.spacingSM) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.quaternary)
                     TextField(
                         appState.currentPath.isRoot ? "Search workspaces…" : "Filter items…",
@@ -179,15 +183,15 @@ struct TrayView: View {
                             appState.searchQuery = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(.quaternary)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Clear search")
                     }
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .padding(.horizontal, d.padSM)
+                .padding(.vertical, d.searchFieldVPad)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
                         .fill(isSearchFocused ? Palette.faint.opacity(2) : Palette.faint)
@@ -212,7 +216,7 @@ struct TrayView: View {
                     }
                 } label: {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 12))
+                        .font(.system(size: d.fontTitle))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.accent)
@@ -233,12 +237,13 @@ struct TrayView: View {
 
             authButton
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.spacingLG)
     }
 
     private var authButton: some View {
-        Group {
+        let d = prefs.density
+        return Group {
             if appState.isSignedIn {
                 Menu {
                     if let name = appState.userName {
@@ -250,17 +255,17 @@ struct TrayView: View {
                     Divider()
                     Button("Sign Out") { appState.signOut() }
                 } label: {
-                    HStack(spacing: 3) {
+                    HStack(spacing: d.spacingXS) {
                         Circle()
                             .fill(Palette.success)
-                            .frame(width: 7, height: 7)
+                            .frame(width: d.iconMicro, height: d.iconMicro)
                         Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: d.fontHeading))
                             .foregroundStyle(Palette.muted)
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 28)
+                .frame(width: floor(28 * prefs.density.scale))
                 .help(appState.userEmail ?? "Signed in")
             } else {
                 Button {
@@ -269,8 +274,8 @@ struct TrayView: View {
                     Text("Sign In")
                         .font(.caption2)
                         .fontWeight(.medium)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, d.spacingLG)
+                        .padding(.vertical, d.padXS)
                         .background(
                             RoundedRectangle(cornerRadius: 5)
                                 .fill(Palette.accent)
@@ -286,7 +291,8 @@ struct TrayView: View {
     // MARK: - Item List
 
     private var itemList: some View {
-        ScrollView {
+        let d = prefs.density
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if appState.isLoading && appState.allItems.isEmpty {
                     // Skeleton loading state
@@ -294,16 +300,16 @@ struct TrayView: View {
                         SkeletonRow()
                     }
                 } else if appState.filteredItems.isEmpty && !appState.isLoading {
-                    VStack(spacing: 4) {
+                    VStack(spacing: d.spacingSM) {
                         Image(systemName: appState.searchQuery.isEmpty ? "tray" : "magnifyingglass")
-                            .font(.system(size: 16))
+                            .font(.system(size: d.fontHero))
                             .foregroundStyle(.quaternary)
                         Text(appState.searchQuery.isEmpty ? "No items" : "No matches for \"\(appState.searchQuery)\"")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
+                    .padding(.vertical, d.padLG)
                     .accessibilityLabel(appState.searchQuery.isEmpty ? "No items found" : "No matches for search query")
                 } else {
                     ForEach(appState.filteredItems) { item in
@@ -336,19 +342,20 @@ struct TrayView: View {
     // MARK: - Recents Section
 
     private var recentsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 5) {
+        let d = prefs.density
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: d.padSM) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
                     .foregroundStyle(Palette.muted)
                 Text("Recent")
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundStyle(Palette.muted)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 5)
-            .padding(.bottom, 3)
+            .padding(.horizontal, d.padMD)
+            .padding(.top, d.padSM)
+            .padding(.bottom, d.padXS)
 
             ForEach(appState.recentItems.prefix(3), id: \.id) { recent in
                 Button {
@@ -360,28 +367,29 @@ struct TrayView: View {
                         await appState.enter(item: item)
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        FabricIconView(recent.type, size: 10)
+                    HStack(spacing: d.padSM) {
+                        FabricIconView(recent.type, size: d.iconSmall)
                         Text(recent.name)
-                            .font(.system(size: 10))
+                            .font(.system(size: d.fontBody))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(1)
                         Spacer()
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, d.padMD)
+                    .padding(.vertical, d.padMicro)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Recent: \(recent.name)")
             }
         }
-        .padding(.bottom, 3)
+        .padding(.bottom, d.padXS)
     }
 
     // MARK: - Signed Out
 
     private var signedOutPlaceholder: some View {
-        VStack(spacing: 12) {
+        let d = prefs.density
+        return VStack(spacing: d.rowHPad) {
             FabricIconView(.workspace, size: 32)
                 .opacity(0.6)
             Text("Microsoft Fabric")
@@ -393,28 +401,29 @@ struct TrayView: View {
                 .multilineTextAlignment(.center)
 
             // Feature highlights
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: d.padSM) {
                 featureRow(icon: "folder.fill", text: "Browse workspaces & items")
                 featureRow(icon: "play.fill", text: "Run notebooks & pipelines")
                 featureRow(icon: "bolt.fill", text: "Monitor jobs in real-time")
                 featureRow(icon: "cpu", text: "Manage capacities & access")
             }
-            .padding(.top, 4)
+            .padding(.top, d.padXS)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .padding(.vertical, d.padXL)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Microsoft Fabric. Sign in to browse workspaces, items, and jobs.")
     }
 
     private func featureRow(icon: String, text: String) -> some View {
-        HStack(spacing: 6) {
+        let d = prefs.density
+        return HStack(spacing: d.padSM) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(.system(size: d.fontCaption))
                 .foregroundStyle(Palette.accent.opacity(0.7))
-                .frame(width: 14)
+                .frame(width: d.iconSize)
             Text(text)
-                .font(.system(size: 10))
+                .font(.system(size: d.fontBody))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -424,16 +433,17 @@ struct TrayView: View {
     @ViewBuilder
     private var statusBar: some View {
         if let toast = appState.toastMessage {
-            HStack(spacing: 5) {
+            let d = prefs.density
+            HStack(spacing: d.padSM) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: d.fontBody))
                     .foregroundStyle(Palette.success)
                 Text(toast)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, d.rowHPad)
+            .padding(.vertical, d.padXS)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.success.opacity(0.08))
             .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
@@ -441,9 +451,10 @@ struct TrayView: View {
         }
 
         if let error = appState.errorMessage {
-            HStack(spacing: 5) {
+            let d = prefs.density
+            HStack(spacing: d.padSM) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: d.fontBody))
                     .foregroundStyle(Palette.destructive)
                 Text(error)
                     .font(.caption2)
@@ -454,11 +465,11 @@ struct TrayView: View {
                     Button {
                         Task { await appState.retryLastAction() }
                     } label: {
-                        HStack(spacing: 3) {
+                        HStack(spacing: d.spacingXS) {
                             Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 8))
+                                .font(.system(size: d.fontMicro))
                             Text("Retry")
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: d.fontCaption, weight: .medium))
                         }
                     }
                     .buttonStyle(.plain)
@@ -466,8 +477,8 @@ struct TrayView: View {
                     .accessibilityLabel("Retry failed action")
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, d.rowHPad)
+            .padding(.vertical, d.padXS)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.destructive.opacity(0.06))
             .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
@@ -478,13 +489,14 @@ struct TrayView: View {
     // MARK: - Footer
 
     private var footerBar: some View {
-        HStack(spacing: 8) {
+        let d = prefs.density
+        return HStack(spacing: d.spacingLG) {
             if appState.isSignedIn {
                 Button {
                     Task { await appState.refresh() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
+                        .font(.system(size: d.fontBody))
                         .rotationEffect(.degrees(appState.isLoading ? 360 : 0))
                         .animation(appState.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: appState.isLoading)
                 }
@@ -495,26 +507,26 @@ struct TrayView: View {
                 .accessibilityLabel("Refresh")
 
                 Text("\(appState.filteredItems.count) items")
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
                     .foregroundStyle(.quaternary)
                     .accessibilityLabel("\(appState.filteredItems.count) items")
 
                 if appState.totalHourlyBurn > 0 {
                     Text("·")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.quaternary)
                     Text("~\(formatCost(appState.totalHourlyBurn))/hr")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: d.fontCaption, design: .monospaced))
                         .foregroundStyle(spendColor(appState.totalHourlyBurn))
                         .help("Estimated total hourly burn across all active capacities")
                 }
 
                 if let time = appState.lastRefreshTime {
                     Text("·")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.quaternary)
                     Text(time, style: .relative)
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.quaternary)
                         .accessibilityLabel("Last refreshed")
                 }
@@ -524,7 +536,7 @@ struct TrayView: View {
                         appState.requestImport()
                     } label: {
                         Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 9))
+                            .font(.system(size: d.fontCaption))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.muted)
@@ -539,7 +551,7 @@ struct TrayView: View {
                 appState.toggleNotifications(!appState.notificationsEnabled)
             } label: {
                 Image(systemName: appState.notificationsEnabled ? "bell.fill" : "bell.slash")
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
             }
             .buttonStyle(.plain)
             .foregroundStyle(appState.notificationsEnabled ? Palette.muted : Color.gray)
@@ -552,7 +564,7 @@ struct TrayView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 60)
+            .frame(width: floor(60 * prefs.density.scale))
             .controlSize(.mini)
             .help("Display density")
             .accessibilityLabel("Display density")
@@ -561,7 +573,7 @@ struct TrayView: View {
                 NSApplication.shared.terminate(nil)
             } label: {
                 Image(systemName: "power")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: d.fontCaption, weight: .medium))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.quaternary)
@@ -569,25 +581,26 @@ struct TrayView: View {
             .keyboardShortcut("q")
             .accessibilityLabel("Quit")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padSM)
     }
 
     // MARK: - Jobs Section
 
     private var jobsSection: some View {
-        DisclosureGroup(isExpanded: $appState.showJobs) {
+        let d = prefs.density
+        return DisclosureGroup(isExpanded: $appState.showJobs) {
             if appState.recentJobs.isEmpty {
                 Text("No recent jobs")
                     .font(.caption2)
                     .foregroundStyle(.quaternary)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, d.padXS)
             } else {
                 VStack(spacing: 0) {
                     ForEach(appState.recentJobs.prefix(10)) { job in
-                        HStack(spacing: 6) {
+                        HStack(spacing: d.padSM) {
                             Image(systemName: job.status.icon)
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(jobStatusColor(job.status))
                             Text(job.itemName.isEmpty ? String(job.itemID.prefix(8)) : job.itemName)
                                 .font(.caption2)
@@ -598,7 +611,7 @@ struct TrayView: View {
                                     appState.requestCancelJob(job)
                                 } label: {
                                     Image(systemName: "stop.circle.fill")
-                                        .font(.system(size: 9))
+                                        .font(.system(size: d.fontCaption))
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(Palette.destructive.opacity(0.7))
@@ -606,24 +619,24 @@ struct TrayView: View {
                                 .accessibilityLabel("Cancel job \(job.itemName)")
                             }
                             Text(job.status.rawValue)
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: d.fontCaption, weight: .medium))
                                 .foregroundStyle(jobStatusColor(job.status).opacity(0.8))
                             if let date = job.startedAt {
                                 Text(date, style: .relative)
-                                    .font(.system(size: 9))
+                                    .font(.system(size: d.fontCaption))
                                     .foregroundStyle(.quaternary)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, d.padMicro)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("\(job.itemName), \(job.status.rawValue)")
                     }
                 }
             }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: d.padSM) {
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
                     .foregroundStyle(Palette.warning)
                 Text("Jobs")
                     .font(.caption)
@@ -631,64 +644,65 @@ struct TrayView: View {
                 let running = appState.recentJobs.filter { $0.status == .inProgress }.count
                 if running > 0 {
                     Text("\(running) running")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: d.fontCaption, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, d.badgePadH)
+                        .padding(.vertical, d.badgePadV)
                         .background(Capsule().fill(Palette.warning))
                 }
                 let failed = appState.recentJobs.filter { $0.status == .failed }.count
                 if failed > 0 {
                     Text("\(failed) failed")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: d.fontCaption, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, d.badgePadH)
+                        .padding(.vertical, d.badgePadV)
                         .background(Capsule().fill(Palette.destructive))
                 }
             }
         }
         .font(.caption)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padSM)
         .accessibilityLabel("Jobs section")
     }
 
     // MARK: - Capacity Spend Bar
 
     private var capacitySpendBar: some View {
-        HStack(spacing: 8) {
+        let d = prefs.density
+        return HStack(spacing: d.spacingLG) {
             Image(systemName: "dollarsign.gauge.chart.lefthalf.righthalf")
-                .font(.system(size: 10))
+                .font(.system(size: d.fontBody))
                 .foregroundStyle(spendColor(appState.totalHourlyBurn))
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: d.badgePadV) {
                 Text("Estimated Burn Rate")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: d.fontCaption, weight: .medium))
                     .foregroundStyle(.secondary)
-                HStack(spacing: 6) {
+                HStack(spacing: d.padSM) {
                     Text("\(formatCost(appState.totalHourlyBurn))/hr")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .font(.system(size: d.fontTitle, weight: .bold, design: .monospaced))
                         .foregroundStyle(spendColor(appState.totalHourlyBurn))
                     Text("≈ \(formatCost(appState.totalMonthlyEstimate))/mo")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: d.fontCaption, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer()
             let active = appState.capacities.filter(\.isActive).count
             let total = appState.capacities.count
-            VStack(alignment: .trailing, spacing: 1) {
+            VStack(alignment: .trailing, spacing: d.badgePadV) {
                 Text("\(active)/\(total) active")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: d.fontCaption, weight: .medium))
                     .foregroundStyle(.secondary)
                 let totalCU = appState.capacities.filter(\.isActive).reduce(0) { $0 + $1.capacityUnits }
                 Text("\(totalCU) CU")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .font(.system(size: d.fontBody, weight: .bold, design: .rounded))
                     .foregroundStyle(Palette.accent)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padSM)
         .background(Palette.sectionBG)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Estimated burn rate \(formatCost(appState.totalHourlyBurn)) per hour")
@@ -697,29 +711,30 @@ struct TrayView: View {
     // MARK: - Capacity-First List
 
     private var capacityFirstList: some View {
-        ScrollView {
+        let d = prefs.density
+        return ScrollView {
             LazyVStack(spacing: 0) {
                 let groups = appState.workspacesByCapacity
                 if groups.isEmpty && !appState.isLoading {
                     // Loading state or truly empty
                     if appState.allItems.isEmpty {
-                        VStack(spacing: 6) {
+                        VStack(spacing: d.padSM) {
                             Image(systemName: "cpu")
-                                .font(.system(size: 20))
+                                .font(.system(size: d.iconHero))
                                 .foregroundStyle(.quaternary)
                             Text("No workspaces found")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
+                        .padding(.vertical, d.iconHero)
                     }
                 } else if appState.isLoading && appState.allItems.isEmpty {
                     ForEach(0..<4, id: \.self) { _ in SkeletonRow() }
                 } else {
                     ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                         if index > 0 {
-                            Divider().opacity(0.3).padding(.horizontal, 10)
+                            Divider().opacity(0.3).padding(.horizontal, d.padMD)
                         }
 
                         // Capacity group header
@@ -734,32 +749,32 @@ struct TrayView: View {
                             Button {
                                 Task { await appState.enter(item: ws) }
                             } label: {
-                                HStack(spacing: 6) {
+                                HStack(spacing: d.padSM) {
                                     Image(systemName: ws.icon)
-                                        .font(.system(size: 10))
+                                        .font(.system(size: d.fontBody))
                                         .foregroundStyle(Palette.accent)
-                                        .frame(width: 14)
+                                        .frame(width: d.iconSize)
                                     Text(ws.name)
                                         .font(.caption2)
                                         .lineLimit(1)
                                     if appState.isFavorite(ws.id) {
                                         Image(systemName: "star.fill")
-                                            .font(.system(size: 7))
+                                            .font(.system(size: d.fontNano))
                                             .foregroundStyle(.yellow)
                                     }
                                     Spacer()
                                     if let role = ws.role {
                                         Text(role.rawValue)
-                                            .font(.system(size: 8))
+                                            .font(.system(size: d.fontMicro))
                                             .foregroundStyle(.secondary)
                                     }
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 7))
+                                        .font(.system(size: d.fontNano))
                                         .foregroundStyle(.quaternary)
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.leading, 12)
-                                .padding(.vertical, 4)
+                                .padding(.horizontal, d.padMD)
+                                .padding(.leading, d.rowHPad)
+                                .padding(.vertical, d.padXS)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -774,31 +789,32 @@ struct TrayView: View {
 
     /// Rich header for a capacity we have full details on.
     private func capacityGroupHeader(_ cap: FabricCapacity, workspaceCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let d = prefs.density
+        return VStack(alignment: .leading, spacing: d.spacingSM) {
             // Top row: SKU badge, name, status
-            HStack(spacing: 6) {
+            HStack(spacing: d.padSM) {
                 if !cap.sku.isEmpty {
                     Text(cap.sku)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: d.fontCaption, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, d.badgePadH)
+                        .padding(.vertical, d.padMicro)
                         .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
                 } else {
                     Image(systemName: "lock.shield")
-                        .font(.system(size: 10))
+                        .font(.system(size: d.fontBody))
                         .foregroundStyle(.orange)
-                        .frame(width: 14)
+                        .frame(width: d.iconSize)
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: d.badgePadV) {
                     Text(cap.displayName)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .lineLimit(1)
-                    HStack(spacing: 4) {
+                    HStack(spacing: d.spacingSM) {
                         if cap.capacityUnits > 0 {
                             Text("\(cap.capacityUnits) CU")
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .font(.system(size: d.fontCaption, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Palette.accent)
                         }
                         if !cap.region.isEmpty {
@@ -806,51 +822,51 @@ struct TrayView: View {
                                 Text("·").foregroundStyle(.quaternary)
                             }
                             Text(cap.region)
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(.secondary)
                         }
                         if cap.sku.isEmpty {
                             Text("Admin access required for details")
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
                 Spacer()
                 if !cap.sku.isEmpty {
-                    HStack(spacing: 3) {
+                    HStack(spacing: d.spacingXS) {
                         Circle()
                             .fill(cap.isActive ? Palette.success : Palette.destructive)
-                            .frame(width: 6, height: 6)
+                            .frame(width: d.padSM, height: d.padSM)
                         Text(cap.isActive ? "Active" : "Paused")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: d.fontCaption, weight: .medium))
                             .foregroundStyle(cap.isActive ? Palette.success : Palette.destructive)
                     }
                 }
             }
             // Burn rate row (per capacity)
             if !cap.sku.isEmpty && cap.hourlyRate > 0 {
-                HStack(spacing: 6) {
+                HStack(spacing: d.padSM) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 8))
+                        .font(.system(size: d.fontMicro))
                         .foregroundStyle(cap.isActive ? spendColor(cap.hourlyRate) : .secondary)
                     if cap.isActive {
                         Text("\(formatCost(cap.hourlyRate))/hr")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(.system(size: d.fontBody, weight: .semibold, design: .monospaced))
                             .foregroundStyle(spendColor(cap.hourlyRate))
                         Text("·").foregroundStyle(.quaternary)
                         Text("~\(formatCost(cap.monthlyEstimate))/mo")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(.system(size: d.fontCaption, design: .monospaced))
                             .foregroundStyle(.secondary)
                         if let util = appState.capacityUtilization[cap.id] {
                             Text("·").foregroundStyle(.quaternary)
                             Text("\(Int(util))% CU")
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .font(.system(size: d.fontCaption, weight: .semibold, design: .rounded))
                                 .foregroundStyle(utilizationColor(util))
                         }
                     } else {
                         Text("Paused — $0/hr")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: d.fontBody, weight: .medium))
                             .foregroundStyle(Palette.success)
                     }
                     Spacer()
@@ -859,7 +875,7 @@ struct TrayView: View {
                         if appState.capacityActionInProgress == cap.id {
                             ProgressView()
                                 .scaleEffect(0.5)
-                                .frame(width: 14, height: 14)
+                                .frame(width: d.progressSize, height: d.progressSize)
                         } else {
                             Button {
                                 Task {
@@ -870,15 +886,15 @@ struct TrayView: View {
                                     }
                                 }
                             } label: {
-                                HStack(spacing: 3) {
+                                HStack(spacing: d.spacingXS) {
                                     Image(systemName: cap.isActive ? "pause.fill" : "play.fill")
-                                        .font(.system(size: 8))
+                                        .font(.system(size: d.fontMicro))
                                     Text(cap.isActive ? "Pause" : "Resume")
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.system(size: d.fontCaption, weight: .medium))
                                 }
                                 .foregroundStyle(cap.isActive ? Palette.warning : Palette.success)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, d.padSM)
+                                .padding(.vertical, d.padMicro)
                                 .background(
                                     RoundedRectangle(cornerRadius: 4)
                                         .strokeBorder(cap.isActive ? Palette.warning : Palette.success, lineWidth: 0.5)
@@ -889,12 +905,12 @@ struct TrayView: View {
                     }
                 }
             } else if cap.licenseType == "Trial" {
-                HStack(spacing: 4) {
+                HStack(spacing: d.spacingSM) {
                     Image(systemName: "gift.fill")
-                        .font(.system(size: 8))
+                        .font(.system(size: d.fontMicro))
                         .foregroundStyle(Palette.success)
                     Text("Trial — Free")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: d.fontCaption, weight: .medium))
                         .foregroundStyle(Palette.success)
                 }
             }
@@ -909,8 +925,8 @@ struct TrayView: View {
                 .frame(height: 3)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padSM)
         .background(Palette.sectionBG)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(cap.displayName), \(cap.sku.isEmpty ? "" : cap.sku + ", ")\(workspaceCount) workspaces")
@@ -918,27 +934,28 @@ struct TrayView: View {
 
     /// Header for workspaces with no capacity assigned.
     private func noCapacityGroupHeader(workspaceCount: Int) -> some View {
-        HStack(spacing: 6) {
+        let d = prefs.density
+        return HStack(spacing: d.padSM) {
             Image(systemName: "square.stack.3d.up")
-                .font(.system(size: 9))
+                .font(.system(size: d.fontCaption))
                 .foregroundStyle(.secondary)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 1) {
+                .frame(width: d.iconSize)
+            VStack(alignment: .leading, spacing: d.badgePadV) {
                 Text("Shared Capacity")
                     .font(.caption2)
                     .fontWeight(.medium)
                     .foregroundStyle(.secondary)
                 Text("Managed by your organization")
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
                     .foregroundStyle(.quaternary)
             }
             Spacer()
             Text("\(workspaceCount)")
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(.system(size: d.fontCaption, weight: .medium, design: .rounded))
                 .foregroundStyle(.quaternary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.padSM)
         .background(Palette.sectionBG)
         .accessibilityLabel("Shared capacity, \(workspaceCount) workspaces")
     }
@@ -995,12 +1012,14 @@ struct TrayView: View {
 struct ItemDetailView: View {
     let item: FabricItem
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var prefs: TrayPreferences
     @State private var isLoading = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let d = prefs.density
+        VStack(alignment: .leading, spacing: d.padSM) {
             if isLoading {
-                HStack(spacing: 6) {
+                HStack(spacing: d.padSM) {
                     ProgressView().controlSize(.small)
                     Text("Loading…")
                         .font(.caption2)
@@ -1013,12 +1032,12 @@ struct ItemDetailView: View {
             }
 
             // ID row
-            HStack(spacing: 3) {
+            HStack(spacing: d.spacingXS) {
                 Text("ID")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: d.fontCaption, weight: .medium))
                     .foregroundStyle(.quaternary)
                 Text(item.id)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: d.fontCaption, design: .monospaced))
                     .foregroundStyle(.quaternary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1028,15 +1047,15 @@ struct ItemDetailView: View {
                     NSPasteboard.general.setString(item.id, forType: .string)
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 7))
+                        .font(.system(size: d.fontNano))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.quaternary)
                 .help("Copy ID")
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 6)
+        .padding(.horizontal, d.padXL + d.padXS)
+        .padding(.vertical, d.padSM)
         .background(Palette.sectionBG)
         .task {
             isLoading = true
@@ -1051,31 +1070,32 @@ struct ItemDetailView: View {
     }
 
     private var aclView: some View {
-        Group {
+        let d = prefs.density
+        return Group {
             if let cap = item.capacity {
-                HStack(spacing: 5) {
+                HStack(spacing: d.padSM) {
                     Text(cap.sku)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: d.fontCaption, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, d.padXS)
+                        .padding(.vertical, d.padMicro)
                         .background(RoundedRectangle(cornerRadius: 3).fill(capColor(cap)))
                     Text(cap.displayName)
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(Palette.muted)
                     Text(cap.region)
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.tertiary)
                     if !cap.isActive {
                         Text("PAUSED")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: d.fontCaption, weight: .bold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
+                            .padding(.horizontal, d.padXS)
+                            .padding(.vertical, d.badgePadV)
                             .background(RoundedRectangle(cornerRadius: 3).fill(Palette.destructive))
                     }
                 }
-                .padding(.bottom, 3)
+                .padding(.bottom, d.padXS)
             }
 
             if appState.roleAssignments.isEmpty {
@@ -1085,33 +1105,33 @@ struct ItemDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(appState.roleAssignments) { ra in
-                        HStack(spacing: 5) {
+                        HStack(spacing: d.padSM) {
                             Image(systemName: ra.role.icon)
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(Palette.muted)
-                                .frame(width: 12)
+                                .frame(width: d.fontTitle)
                             Text(ra.principalName)
-                                .font(.system(size: 10))
+                                .font(.system(size: d.fontBody))
                                 .lineLimit(1)
                             Spacer()
                             Text(ra.principalType)
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                                 .foregroundStyle(.quaternary)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
+                                .padding(.horizontal, d.padXS)
+                                .padding(.vertical, d.badgePadV)
                                 .background(RoundedRectangle(cornerRadius: 3).fill(Palette.faint))
                             Button {
                                 appState.requestRemoveRole(ra, workspaceID: item.id)
                             } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: d.fontCaption))
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(Palette.destructive.opacity(0.5))
                             .help("Remove access")
                             .accessibilityLabel("Remove access for \(ra.principalName)")
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, d.padMicro)
                         .accessibilityElement(children: .combine)
                     }
                 }
@@ -1119,48 +1139,49 @@ struct ItemDetailView: View {
             Button {
                 appState.requestAddRole(workspaceID: item.id)
             } label: {
-                HStack(spacing: 3) {
+                HStack(spacing: d.spacingXS) {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                     Text("Add access")
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: d.fontCaption, weight: .medium))
                 }
             }
             .buttonStyle(.plain)
             .foregroundStyle(Palette.accent)
-            .padding(.top, 2)
+            .padding(.top, d.padMicro)
             .accessibilityLabel("Add access")
         }
     }
 
     private var detailView: some View {
-        Group {
+        let d = prefs.density
+        return Group {
             if let detail = appState.itemDetail {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: d.spacingSM) {
+                    HStack(spacing: d.spacingSM) {
                         Text("Type")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: d.fontCaption, weight: .medium))
                             .foregroundStyle(.quaternary)
                         Text(item.type.rawValue)
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: d.fontCaption, weight: .medium))
                             .foregroundStyle(Palette.muted)
                     }
                     if let desc = detail.description, !desc.isEmpty {
                         Text(desc)
-                            .font(.system(size: 10))
+                            .font(.system(size: d.fontBody))
                             .foregroundStyle(Palette.muted)
                             .lineLimit(3)
                     }
                     if let label = detail.sensitivityLabel {
-                        HStack(spacing: 3) {
+                        HStack(spacing: d.spacingXS) {
                             Image(systemName: "tag.fill")
-                                .font(.system(size: 9))
+                                .font(.system(size: d.fontCaption))
                             Text(label.name)
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: d.fontCaption, weight: .medium))
                         }
                         .foregroundStyle(Palette.warning)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, d.badgePadH)
+                        .padding(.vertical, d.padMicro)
                         .background(RoundedRectangle(cornerRadius: 3).fill(Palette.warning.opacity(0.1)))
                     }
                 }
@@ -1195,11 +1216,12 @@ struct ItemRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        let d = prefs.density
+        return HStack(spacing: d.padSM) {
             // Favorite indicator
             if isFavorite {
                 Image(systemName: "star.fill")
-                    .font(.system(size: 7))
+                    .font(.system(size: d.fontNano))
                     .foregroundStyle(Palette.warning)
                     .accessibilityLabel("Favorited")
             }
@@ -1221,22 +1243,22 @@ struct ItemRow: View {
             if item.type == .workspace {
                 if let role = item.role {
                     Image(systemName: role.icon)
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                         .foregroundStyle(.tertiary)
                         .help(role.rawValue)
                 }
                 if item.isOnCapacity {
                     if let cap = item.capacity {
-                        HStack(spacing: 2) {
+                        HStack(spacing: d.spacingXS) {
                             Text(cap.sku)
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .font(.system(size: d.fontCaption, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
+                                .padding(.horizontal, d.padXS)
+                                .padding(.vertical, d.badgePadV)
                                 .background(RoundedRectangle(cornerRadius: 3).fill(skuColor(cap)))
                             if !cap.isActive {
                                 Image(systemName: "pause.circle.fill")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: d.fontCaption))
                                     .foregroundStyle(Palette.destructive)
                                     .help("Capacity paused")
                             }
@@ -1245,21 +1267,21 @@ struct ItemRow: View {
                     } else {
                         Circle()
                             .fill(Color.gray.opacity(0.3))
-                            .frame(width: 5, height: 5)
+                            .frame(width: d.badgePadH, height: d.badgePadH)
                     }
                 }
             } else {
                 if let label = item.sensitivityLabel {
                     Text(label.name)
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(size: d.fontCaption, weight: .medium))
                         .foregroundStyle(Palette.warning)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, d.padXS)
+                        .padding(.vertical, d.badgePadV)
                         .background(RoundedRectangle(cornerRadius: 3).fill(Palette.warning.opacity(0.12)))
                         .lineLimit(1)
                 }
                 Text(item.type.rawValue)
-                    .font(.system(size: 9))
+                    .font(.system(size: d.fontCaption))
                     .foregroundStyle(.quaternary)
             }
 
@@ -1269,7 +1291,7 @@ struct ItemRow: View {
             Group {
                 Button { onToggleExpand() } label: {
                     Image(systemName: isExpanded ? "info.circle.fill" : "info.circle")
-                        .font(.system(size: 10))
+                        .font(.system(size: d.fontBody))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(isExpanded ? Palette.accent : Palette.muted.opacity(0.5))
@@ -1282,7 +1304,7 @@ struct ItemRow: View {
                         appState.requestRun(item)
                     } label: {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 9))
+                            .font(.system(size: d.fontCaption))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.accent)
@@ -1294,7 +1316,7 @@ struct ItemRow: View {
                     appState.openItem(item)
                 } label: {
                     Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Palette.muted.opacity(0.5))
@@ -1303,8 +1325,8 @@ struct ItemRow: View {
             }
             .opacity(isHovered || isExpanded ? 1 : 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, prefs.density.rowVPad)
+        .padding(.horizontal, d.padMD)
+        .padding(.vertical, d.rowVPad)
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isHovered ? Palette.hoverBG : Color.clear)
@@ -1317,7 +1339,7 @@ struct ItemRow: View {
         ), arrowEdge: .trailing) {
             ActionConfirmationView()
                 .environmentObject(appState)
-                .frame(width: 280)
+                .frame(width: floor(280 * prefs.density.scale))
         }
         .contextMenu {
             Section {
@@ -1445,6 +1467,7 @@ struct ItemRow: View {
 
 struct ActionConfirmationView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var prefs: TrayPreferences
     @State private var textInput = ""
     @State private var textInput2 = ""
     @State private var selectedType: FabricItemType = .notebook
@@ -1454,14 +1477,15 @@ struct ActionConfirmationView: View {
     private var action: PendingAction? { appState.pendingAction }
 
     var body: some View {
+        let d = prefs.density
         if let action = action {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: d.spacingLG) {
                 // Header
-                HStack(spacing: 6) {
+                HStack(spacing: d.padSM) {
                     Image(systemName: action.acceptIcon)
-                        .font(.system(size: 12))
+                        .font(.system(size: d.fontTitle))
                         .foregroundStyle(action.isDestructive ? Palette.destructive : Palette.accent)
-                        .frame(width: 16)
+                        .frame(width: d.iconLarge)
                     Text(action.title)
                         .font(.system(.caption, weight: .semibold))
                         .lineLimit(1)
@@ -1471,7 +1495,7 @@ struct ActionConfirmationView: View {
                 formFields(for: action)
 
                 // Buttons
-                HStack(spacing: 8) {
+                HStack(spacing: d.spacingLG) {
                     Spacer()
                     Button("Cancel") { appState.dismissAction() }
                         .font(.caption2)
@@ -1490,13 +1514,13 @@ struct ActionConfirmationView: View {
                             )
                         }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: d.spacingSM) {
                             Image(systemName: action.acceptIcon)
-                                .font(.system(size: 8))
+                                .font(.system(size: d.fontMicro))
                             Text(action.acceptLabel)
                                 .font(.system(.caption2, weight: .medium))
                         }
-                        .padding(.horizontal, 4)
+                        .padding(.horizontal, d.padXS)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -1504,8 +1528,8 @@ struct ActionConfirmationView: View {
                     .keyboardShortcut(.return, modifiers: [])
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, d.rowHPad)
+            .padding(.vertical, d.padMD)
             .background(Palette.sectionBG)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Confirm action: \(action.title)")
@@ -1514,15 +1538,16 @@ struct ActionConfirmationView: View {
 
     @ViewBuilder
     private func formFields(for action: PendingAction) -> some View {
+        let d = prefs.density
         switch action.kind {
         case .run:
             if action.supportsParameters {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: d.spacingXS) {
                     Text("Execution parameters (JSON)")
-                        .font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
+                        .font(.system(size: d.fontCaption, weight: .medium)).foregroundStyle(.tertiary)
                     TextField("{\"key\": \"value\"}", text: $textInput)
                         .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: d.fontBody, design: .monospaced))
                         .accessibilityLabel("Execution parameters")
                 }
             }
@@ -1539,7 +1564,7 @@ struct ActionConfirmationView: View {
                 .accessibilityLabel("Workspace name")
 
         case .createItem:
-            VStack(spacing: 4) {
+            VStack(spacing: d.spacingSM) {
                 TextField("Item name", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
                     .accessibilityLabel("Item name")
@@ -1555,9 +1580,9 @@ struct ActionConfirmationView: View {
 
         case .assignCapacity:
             if appState.capacities.isEmpty {
-                HStack(spacing: 4) {
+                HStack(spacing: d.spacingSM) {
                     Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 9))
+                        .font(.system(size: d.fontCaption))
                     Text("No capacities available")
                         .font(.caption2)
                 }
@@ -1575,7 +1600,7 @@ struct ActionConfirmationView: View {
             }
 
         case .addRole:
-            VStack(spacing: 4) {
+            VStack(spacing: d.spacingSM) {
                 TextField("Email or object ID", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
                     .accessibilityLabel("Email or object ID")
@@ -1596,7 +1621,7 @@ struct ActionConfirmationView: View {
                 .accessibilityLabel("Sensitivity label ID")
 
         case .createShortcut:
-            VStack(spacing: 4) {
+            VStack(spacing: d.spacingSM) {
                 TextField("Shortcut name", text: $textInput)
                     .textFieldStyle(.roundedBorder).font(.caption)
                     .accessibilityLabel("Shortcut name")
@@ -1620,6 +1645,7 @@ struct ActionConfirmationView: View {
 
 struct OnboardingView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var prefs: TrayPreferences
     @State private var currentStep = 0
 
     private let steps: [(icon: String, title: String, description: String)] = [
@@ -1636,23 +1662,24 @@ struct OnboardingView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 12) {
+        let d = prefs.density
+        return VStack(spacing: d.rowHPad) {
             // Step indicator
-            HStack(spacing: 4) {
+            HStack(spacing: d.spacingSM) {
                 ForEach(0..<steps.count, id: \.self) { idx in
                     Circle()
                         .fill(idx == currentStep ? Palette.accent : Color.primary.opacity(0.15))
-                        .frame(width: 6, height: 6)
+                        .frame(width: d.padSM, height: d.padSM)
                 }
             }
-            .padding(.top, 12)
+            .padding(.top, d.rowHPad)
 
             // Content
-            VStack(spacing: 8) {
+            VStack(spacing: d.spacingLG) {
                 Image(systemName: steps[currentStep].icon)
-                    .font(.system(size: 28))
+                    .font(.system(size: floor(28 * d.scale)))
                     .foregroundStyle(Palette.accent)
-                    .frame(height: 36)
+                    .frame(height: floor(36 * d.scale))
 
                 Text(steps[currentStep].title)
                     .font(.system(.caption, weight: .semibold))
@@ -1663,12 +1690,12 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, d.iconHero)
             }
             .animation(.easeInOut(duration: 0.2), value: currentStep)
 
             // Navigation
-            HStack(spacing: 12) {
+            HStack(spacing: d.rowHPad) {
                 if currentStep > 0 {
                     Button("Back") {
                         currentStep -= 1
@@ -1686,8 +1713,8 @@ struct OnboardingView: View {
                     } label: {
                         Text("Next")
                             .font(.system(.caption2, weight: .medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, d.rowHPad)
+                            .padding(.vertical, d.padXS)
                             .background(Palette.accent)
                             .foregroundStyle(.white)
                             .cornerRadius(5)
@@ -1699,8 +1726,8 @@ struct OnboardingView: View {
                     } label: {
                         Text("Get Started")
                             .font(.system(.caption2, weight: .medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, d.rowHPad)
+                            .padding(.vertical, d.padXS)
                             .background(Palette.accent)
                             .foregroundStyle(.white)
                             .cornerRadius(5)
@@ -1708,17 +1735,17 @@ struct OnboardingView: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, d.padLG)
 
             Button("Skip") {
                 appState.completeOnboarding()
             }
-            .font(.system(size: 10))
+            .font(.system(size: d.fontBody))
             .buttonStyle(.plain)
             .foregroundStyle(.quaternary)
-            .padding(.bottom, 8)
+            .padding(.bottom, d.spacingLG)
         }
-        .frame(width: 300)
+        .frame(width: floor(300 * d.scale))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Welcome tour, step \(currentStep + 1) of \(steps.count)")
     }
