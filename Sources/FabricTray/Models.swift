@@ -406,6 +406,14 @@ struct JobRun: Identifiable {
     let startedAt: Date?
     let endedAt: Date?
     let failureReason: String?
+    let workspaceID: String?
+    let itemType: FabricItemType?
+
+    /// URL to the item's monitoring page in the Fabric portal.
+    var fabricPortalURL: URL? {
+        guard let wsID = workspaceID, let type = itemType, !type.urlPathSegment.isEmpty else { return nil }
+        return URL(string: "https://app.fabric.microsoft.com/groups/\(wsID)/\(type.urlPathSegment)/\(itemID)")
+    }
 }
 
 // MARK: - Tray Status (CCMenu-style)

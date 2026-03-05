@@ -17,7 +17,7 @@ final class AppStateTests: XCTestCase {
     private func makeJobRun(
         id: String = "job-1", itemID: String = "item-1", status: JobRunStatus = .inProgress
     ) -> JobRun {
-        JobRun(id: id, itemID: itemID, itemName: "TestItem", status: status, startedAt: nil, endedAt: nil, failureReason: nil)
+        JobRun(id: id, itemID: itemID, itemName: "TestItem", status: status, startedAt: nil, endedAt: nil, failureReason: nil, workspaceID: nil, itemType: nil)
     }
 
     // MARK: - Initial State

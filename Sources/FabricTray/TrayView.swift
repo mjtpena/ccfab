@@ -674,6 +674,24 @@ struct TrayView: View {
                                     .padding(.leading, d.padMD + d.padSM)
                                     .padding(.top, d.padMicro)
                             }
+                            // Link to Fabric portal for investigation
+                            if let url = job.fabricPortalURL {
+                                Button {
+                                    NSWorkspace.shared.open(url)
+                                } label: {
+                                    HStack(spacing: d.padMicro) {
+                                        Image(systemName: "arrow.up.right.square")
+                                            .font(.system(size: d.fontCaption))
+                                        Text("View in Fabric")
+                                            .font(.system(size: d.fontCaption))
+                                    }
+                                    .foregroundStyle(Palette.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.leading, d.padMD + d.padSM)
+                                .padding(.top, d.padMicro)
+                                .help("Open item in Fabric portal")
+                            }
                         }
                         .padding(.vertical, d.padMicro)
                         .accessibilityElement(children: .combine)

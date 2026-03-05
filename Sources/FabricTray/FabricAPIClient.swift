@@ -312,7 +312,7 @@ final class FabricAPIClient: @unchecked Sendable {
             path: "v1/workspaces/\(workspaceID)/items/\(itemID)/jobs/instances?limit=5",
             accessToken: accessToken
         )
-        return parseJobRuns(from: data, itemName: "")
+        return parseJobRuns(from: data, itemName: "", workspaceID: workspaceID)
     }
 
     func cancelJob(workspaceID: String, itemID: String, jobID: String, accessToken: String) async throws {
@@ -389,12 +389,13 @@ final class FabricAPIClient: @unchecked Sendable {
             for item in runnableItems {
                 let itemName = item.name
                 let itemID = item.id
+                let itemType = item.type
                 group.addTask { [self] in
                     guard let data = try? await self.get(
                         path: "v1/workspaces/\(workspaceID)/items/\(itemID)/jobs/instances?limit=3",
                         accessToken: accessToken
                     ) else { return [] }
-                    return self.parseJobRuns(from: data, itemName: itemName)
+                    return self.parseJobRuns(from: data, itemName: itemName, workspaceID: workspaceID, itemType: itemType)
                 }
             }
             var all: [JobRun] = []
@@ -746,7 +747,7 @@ final class FabricAPIClient: @unchecked Sendable {
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    private func parseJobRuns(from data: Data, itemName: String) -> [JobRun] {
+    private func parseJobRuns(from data: Data, itemName: String, workspaceID: String? = nil, itemType: FabricItemType? = nil) -> [JobRun] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [] }
         let objects = (root["value"] as? [[String: Any]]) ?? []
 
@@ -766,7 +767,7 @@ final class FabricAPIClient: @unchecked Sendable {
             // Fabric API returns failureReason for failed jobs
             let failureReason = (obj["failureReason"] as? String)
                 ?? ((obj["rootActivityId"] as? String).map { "Activity: \($0)" })
-            return JobRun(id: id, itemID: itemID, itemName: itemName, status: status, startedAt: startedAt, endedAt: endedAt, failureReason: failureReason)
+            return JobRun(id: id, itemID: itemID, itemName: itemName, status: status, startedAt: startedAt, endedAt: endedAt, failureReason: failureReason, workspaceID: workspaceID, itemType: itemType)
         }
     }
 }
