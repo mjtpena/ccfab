@@ -404,6 +404,8 @@ struct JobRun: Identifiable {
     let itemName: String
     let status: JobRunStatus
     let startedAt: Date?
+    let endedAt: Date?
+    let failureReason: String?
 }
 
 // MARK: - Tray Status (CCMenu-style)

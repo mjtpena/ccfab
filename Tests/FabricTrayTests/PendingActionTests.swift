@@ -88,7 +88,7 @@ final class PendingActionTests: XCTestCase {
         XCTAssertTrue(PendingAction(kind: .deleteItem(sampleItem)).isDestructive)
         XCTAssertTrue(PendingAction(kind: .removeRole(sampleRole, workspaceID: "ws-1")).isDestructive)
         XCTAssertTrue(PendingAction(kind: .removeLabel(sampleItem, workspaceID: "ws-1")).isDestructive)
-        XCTAssertTrue(PendingAction(kind: .cancelJob(JobRun(id: "j1", itemID: "i1", itemName: "N", status: .inProgress, startedAt: nil))).isDestructive)
+        XCTAssertTrue(PendingAction(kind: .cancelJob(JobRun(id: "j1", itemID: "i1", itemName: "N", status: .inProgress, startedAt: nil, endedAt: nil, failureReason: nil))).isDestructive)
         XCTAssertTrue(PendingAction(kind: .unassignCapacity(sampleWorkspace)).isDestructive)
 
         XCTAssertFalse(PendingAction(kind: .run(sampleItem)).isDestructive)

@@ -624,38 +624,60 @@ struct TrayView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(appState.recentJobs.prefix(10)) { job in
-                        HStack(spacing: d.padSM) {
-                            Image(systemName: job.status.icon)
-                                .font(.system(size: d.fontCaption))
-                                .foregroundStyle(jobStatusColor(job.status))
-                            Text(job.itemName.isEmpty ? String(job.itemID.prefix(8)) : job.itemName)
-                                .font(.caption2)
-                                .lineLimit(1)
-                            Spacer()
-                            if job.status == .inProgress {
-                                Button {
-                                    appState.requestCancelJob(job)
-                                } label: {
-                                    Image(systemName: "stop.circle.fill")
-                                        .font(.system(size: d.fontCaption))
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: d.padSM) {
+                                Image(systemName: job.status.icon)
+                                    .font(.system(size: d.fontCaption))
+                                    .foregroundStyle(jobStatusColor(job.status))
+                                Text(job.itemName.isEmpty ? String(job.itemID.prefix(8)) : job.itemName)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                                Spacer()
+                                if job.status == .inProgress {
+                                    Button {
+                                        appState.requestCancelJob(job)
+                                    } label: {
+                                        Image(systemName: "stop.circle.fill")
+                                            .font(.system(size: d.fontCaption))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(Palette.destructive.opacity(0.7))
+                                    .help("Cancel job")
+                                    .accessibilityLabel("Cancel job \(job.itemName)")
                                 }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(Palette.destructive.opacity(0.7))
-                                .help("Cancel job")
-                                .accessibilityLabel("Cancel job \(job.itemName)")
+                                Text(job.status.rawValue)
+                                    .font(.system(size: d.fontCaption, weight: .medium))
+                                    .foregroundStyle(jobStatusColor(job.status).opacity(0.8))
+                                if let date = job.startedAt {
+                                    Text(date, style: .relative)
+                                        .font(.system(size: d.fontCaption))
+                                        .foregroundStyle(.quaternary)
+                                }
                             }
-                            Text(job.status.rawValue)
-                                .font(.system(size: d.fontCaption, weight: .medium))
-                                .foregroundStyle(jobStatusColor(job.status).opacity(0.8))
-                            if let date = job.startedAt {
-                                Text(date, style: .relative)
+                            // Show failure reason for failed jobs
+                            if job.status == .failed, let reason = job.failureReason, !reason.isEmpty {
+                                Text(reason)
+                                    .font(.system(size: d.fontCaption))
+                                    .foregroundStyle(Palette.destructive.opacity(0.7))
+                                    .lineLimit(3)
+                                    .padding(.leading, d.padMD + d.padSM)
+                                    .padding(.top, d.padMicro)
+                                    .textSelection(.enabled)
+                            }
+                            // Duration for completed/failed jobs
+                            if let start = job.startedAt, let end = job.endedAt,
+                               (job.status == .completed || job.status == .failed) {
+                                let duration = end.timeIntervalSince(start)
+                                Text("Duration: \(formatDuration(duration))")
                                     .font(.system(size: d.fontCaption))
                                     .foregroundStyle(.quaternary)
+                                    .padding(.leading, d.padMD + d.padSM)
+                                    .padding(.top, d.padMicro)
                             }
                         }
                         .padding(.vertical, d.padMicro)
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("\(job.itemName), \(job.status.rawValue)")
+                        .accessibilityLabel("\(job.itemName), \(job.status.rawValue)\(job.failureReason.map { ", reason: \($0)" } ?? "")")
                     }
                 }
             }
@@ -1002,6 +1024,13 @@ struct TrayView: View {
         } else {
             return String(format: "$%.2f", amount)
         }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m \(s % 60)s" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
     }
 
     private func spendColor(_ hourlyRate: Double) -> Color {

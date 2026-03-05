@@ -755,10 +755,18 @@ final class FabricAPIClient: @unchecked Sendable {
             let status = JobRunStatus.from((obj["status"] as? String) ?? "Unknown")
             let itemID = (obj["itemId"] as? String) ?? ""
             var startedAt: Date?
+            var endedAt: Date?
+            let isoFmt = ISO8601DateFormatter()
             if let ts = obj["startTimeUtc"] as? String {
-                startedAt = ISO8601DateFormatter().date(from: ts)
+                startedAt = isoFmt.date(from: ts)
             }
-            return JobRun(id: id, itemID: itemID, itemName: itemName, status: status, startedAt: startedAt)
+            if let ts = obj["endTimeUtc"] as? String {
+                endedAt = isoFmt.date(from: ts)
+            }
+            // Fabric API returns failureReason for failed jobs
+            let failureReason = (obj["failureReason"] as? String)
+                ?? ((obj["rootActivityId"] as? String).map { "Activity: \($0)" })
+            return JobRun(id: id, itemID: itemID, itemName: itemName, status: status, startedAt: startedAt, endedAt: endedAt, failureReason: failureReason)
         }
     }
 }
