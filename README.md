@@ -35,24 +35,65 @@ swift build
 # Run tests
 swift test
 
-# Launch as menu bar app
-mkdir -p .build/FabricTray.app/Contents/{MacOS,Resources}
-cp .build/arm64-apple-macosx/debug/FabricTray .build/FabricTray.app/Contents/MacOS/
-cp -R .build/arm64-apple-macosx/debug/FabricTray_FabricTray.bundle .build/FabricTray.app/Contents/Resources/ 2>/dev/null || true
-cat > .build/FabricTray.app/Contents/Info.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.fabrictray.app</string>
-  <key>CFBundleName</key><string>FabricTray</string>
-  <key>CFBundleExecutable</key><string>FabricTray</string>
-  <key>LSUIElement</key><true/>
-</dict></plist>
-EOF
-open .build/FabricTray.app
+# Launch as menu bar app (development)
+./scripts/build-appstore.sh
+open .build/appstore/FabricTray.app
 ```
 
 > **Note:** SwiftPM executables don't register with the macOS menu bar natively. The `.app` bundle wrapper with `LSUIElement=true` is required for the tray icon to appear.
+
+## App Store Build
+
+The project includes everything needed for Mac App Store submission.
+
+### 1. Add App Icon (required for App Store)
+
+Place PNG icons in `Sources/FabricTray/Resources/Assets.xcassets/AppIcon.appiconset/` using standard macOS naming:
+
+```
+icon_16x16.png, icon_16x16@2x.png
+icon_32x32.png, icon_32x32@2x.png
+icon_128x128.png, icon_128x128@2x.png
+icon_256x256.png, icon_256x256@2x.png
+icon_512x512.png, icon_512x512@2x.png
+```
+
+### 2. Build & Sign
+
+```bash
+# Unsigned build (for local testing)
+./scripts/build-appstore.sh
+
+# Signed with Hardened Runtime (for notarization / direct distribution)
+./scripts/build-appstore.sh --sign "Developer ID Application: Your Name (TEAMID)"
+
+# Archive for App Store submission
+./scripts/build-appstore.sh --archive "3rd Party Mac Developer Application: Your Name (TEAMID)"
+```
+
+### 3. Submit
+
+```bash
+xcrun altool --upload-app -f .build/appstore/FabricTray.pkg -t osx -u YOUR_APPLE_ID
+```
+
+### App Store Files
+
+| File | Purpose |
+|------|---------|
+| `Sources/FabricTray/Resources/Info.plist` | App metadata, version, URL scheme, category |
+| `Sources/FabricTray/Resources/FabricTray.entitlements` | App Sandbox + network + Keychain + file access |
+| `Sources/FabricTray/Resources/PrivacyInfo.xcprivacy` | Privacy manifest (UserDefaults declaration) |
+| `Sources/FabricTray/Resources/Assets.xcassets/` | App icon asset catalog |
+| `scripts/build-appstore.sh` | Automated build, sign, and archive |
+
+### Entitlements
+
+The app requests these sandbox entitlements:
+- **App Sandbox** — required for App Store
+- **Outgoing Network** — Fabric REST API and Microsoft OAuth
+- **Keychain Access** — secure token storage
+- **User-Selected Files** — export/import via save/open panels
 
 ## Configuration
 
@@ -67,7 +108,7 @@ export FABRIC_TRAY_CLIENT_ID=<your-client-id>
 
 | Fabric CLI | FabricTray |
 |---|---|
-| `auth login / logout` | Sign In / Sign Out via OAuth device code flow |
+| `auth login / logout` | Sign In / Sign Out via OAuth PKCE flow |
 | `ls` / `cd` | Breadcrumb navigation + searchable item list |
 | `open` | Open-in-browser per item (context menu) |
 | `run` / `start` | Run button with optional execution parameters |
@@ -91,13 +132,18 @@ Sources/FabricTray/
 ├── Models.swift              # Data types, ActionKind enum
 ├── AppState.swift            # Central @MainActor state management
 ├── FabricAPIClient.swift     # Fabric REST API communication
-├── MicrosoftAuthService.swift# OAuth device code flow
+├── MicrosoftAuthService.swift# OAuth PKCE flow
 ├── TokenStore.swift          # Keychain token persistence
 ├── TrayView.swift            # SwiftUI tray UI
 ├── TrayPreferences.swift     # Density/sizing preferences
 ├── FabricIcon.swift          # SVG icon loader
 ├── AppDefaults.swift         # Default configuration
-└── Resources/Icons/          # Fabric SVG tray icon
+└── Resources/
+    ├── Info.plist             # App bundle metadata
+    ├── FabricTray.entitlements# Sandbox entitlements
+    ├── PrivacyInfo.xcprivacy  # Privacy manifest
+    ├── Assets.xcassets/       # App icon asset catalog
+    └── Icons/                 # Fabric SVG tray icons
 
 Tests/FabricTrayTests/
 ├── ModelsTests.swift
