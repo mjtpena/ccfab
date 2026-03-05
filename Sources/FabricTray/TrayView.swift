@@ -62,7 +62,6 @@ struct TrayView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var prefs: TrayPreferences
     @State private var expandedItemID: String?
-    @State private var showCapacities = false
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -76,35 +75,22 @@ struct TrayView: View {
                 Divider().opacity(0.5)
 
                 if appState.isSignedIn {
-                    // Capacity-first view: show capacity dashboard at root
-                    if appState.viewMode == .capacityFirst && (appState.currentPath.isRoot || appState.currentPath.isCapacityLevel) && appState.currentPath.workspaceID == nil {
+                    // Root: show capacities as top-level parents
+                    if appState.currentPath.isRoot {
                         if !appState.capacities.isEmpty {
                             capacitySpendBar
                             Divider().opacity(0.5)
                         }
-                        if appState.currentPath.isCapacityLevel {
-                            itemList
-                        } else {
-                            capacityFirstList
-                        }
+                        capacityFirstList
+                    } else if appState.currentPath.isCapacityLevel {
+                        // Capacity level: show workspaces in this capacity
+                        itemList
                     } else {
-                        // Workspace-first view (default)
-                        if appState.currentPath.isRoot && appState.searchQuery.isEmpty && !appState.recentItems.isEmpty {
-                            recentsSection
-                            Divider().opacity(0.5)
-                        }
-
+                        // Workspace / sub-item level
                         itemList
 
-                        if !appState.currentPath.isRoot && !appState.currentPath.isCapacityLevel {
-                            Divider().opacity(0.5)
-                            jobsSection
-                        }
-
-                        if appState.currentPath.isRoot && !appState.capacities.isEmpty {
-                            Divider().opacity(0.5)
-                            capacitiesSection
-                        }
+                        Divider().opacity(0.5)
+                        jobsSection
                     }
                 } else {
                     signedOutPlaceholder
@@ -218,20 +204,6 @@ struct TrayView: View {
 
             // Actions with keyboard shortcuts
             if appState.isSignedIn {
-                // View mode toggle (workspace-first vs capacity-first)
-                if !appState.capacities.isEmpty && appState.currentPath.isRoot {
-                    Button {
-                        appState.toggleViewMode()
-                    } label: {
-                        Image(systemName: appState.viewMode == .capacityFirst ? "cpu" : "folder")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Palette.accent)
-                    .help(appState.viewMode == .capacityFirst ? "Switch to workspace view" : "Switch to capacity view")
-                    .accessibilityLabel("Toggle view mode")
-                }
-
                 Button {
                     if appState.currentPath.isRoot {
                         appState.requestCreateWorkspace()
@@ -527,7 +499,7 @@ struct TrayView: View {
                     .foregroundStyle(.quaternary)
                     .accessibilityLabel("\(appState.filteredItems.count) items")
 
-                if appState.totalHourlyBurn > 0 && appState.viewMode == .workspaceFirst {
+                if appState.totalHourlyBurn > 0 {
                     Text("·")
                         .font(.system(size: 9))
                         .foregroundStyle(.quaternary)
@@ -680,54 +652,6 @@ struct TrayView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .accessibilityLabel("Jobs section")
-    }
-
-    // MARK: - Capacities Section (workspace-first mode)
-
-    private var capacitiesSection: some View {
-        DisclosureGroup(isExpanded: $showCapacities) {
-            VStack(spacing: 0) {
-                ForEach(appState.capacities, id: \.id) { cap in
-                    Button {
-                        Task { await appState.enterCapacity(cap) }
-                    } label: {
-                        capacityRow(cap)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Palette.accent)
-                Text("Capacities")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                Text("\(appState.capacities.count)")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
-                Spacer()
-                if appState.totalHourlyBurn > 0 {
-                    Text("~\(formatCost(appState.totalHourlyBurn))/hr")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(spendColor(appState.totalHourlyBurn))
-                }
-                let paused = appState.capacities.filter { !$0.isActive }.count
-                if paused > 0 {
-                    Text("\(paused) paused")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Palette.destructive))
-                }
-            }
-        }
-        .font(.caption)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .accessibilityLabel("Capacities section")
     }
 
     // MARK: - Capacity Spend Bar

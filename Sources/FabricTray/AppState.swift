@@ -41,7 +41,6 @@ final class AppState: ObservableObject {
 
     // Capacities
     @Published var capacities: [FabricCapacity] = []
-    @Published var viewMode: ViewMode = .workspaceFirst
 
     /// Total estimated hourly cost across all active capacities (USD).
     var totalHourlyBurn: Double {
@@ -51,9 +50,8 @@ final class AppState: ObservableObject {
     /// Estimated monthly cost across all active capacities (USD).
     var totalMonthlyEstimate: Double { totalHourlyBurn * 730.0 }
 
-    /// Workspaces grouped by their capacity ID. Unassigned workspaces are under "".
+    /// Workspaces grouped by their capacity ID. Unassigned workspaces are under nil key.
     var workspacesByCapacity: [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
-        guard currentPath.isRoot else { return [] }
         let wsItems = allItems.filter { $0.type == .workspace }
         var grouped: [String: [FabricItem]] = [:]
         for ws in wsItems {
@@ -62,7 +60,6 @@ final class AppState: ObservableObject {
         }
         let capMap = Dictionary(uniqueKeysWithValues: capacities.map { ($0.id, $0) })
         var result: [(FabricCapacity?, [FabricItem])] = []
-        // Sort: active capacities first (by name), then inactive, then unassigned last
         let capKeys = grouped.keys.filter { !$0.isEmpty }.sorted { a, b in
             let capA = capMap[a]
             let capB = capMap[b]
@@ -77,8 +74,6 @@ final class AppState: ObservableObject {
         }
         return result
     }
-
-    enum ViewMode: String { case workspaceFirst, capacityFirst }
 
     // ACL / Detail
     @Published var roleAssignments: [RoleAssignment] = []
@@ -116,10 +111,6 @@ final class AppState: ObservableObject {
 
     init() {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
-        if let mode = UserDefaults.standard.string(forKey: "viewMode"),
-           let m = ViewMode(rawValue: mode) {
-            viewMode = m
-        }
         Task { @MainActor [weak self] in
             self?.setupNotifications()
             self?.restoreSession()
@@ -132,11 +123,6 @@ final class AppState: ObservableObject {
     func completeOnboarding() {
         hasCompletedOnboarding = true
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-    }
-
-    func toggleViewMode() {
-        viewMode = viewMode == .workspaceFirst ? .capacityFirst : .workspaceFirst
-        UserDefaults.standard.set(viewMode.rawValue, forKey: "viewMode")
     }
 
     // MARK: - Auth
