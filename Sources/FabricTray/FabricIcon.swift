@@ -10,7 +10,71 @@ enum FabricIcon {
     }
 
     static func trayIcon() -> NSImage? {
-        return loadSVG(named: "fabric_tray", size: 18, isTemplate: true)
+        // Try SVG first
+        if let svg = loadSVG(named: "fabric_tray", size: 18, isTemplate: true) {
+            return svg
+        }
+        // Programmatic fallback: faceted diamond as template image
+        return drawTrayDiamond(size: 18)
+    }
+
+    /// Draw a faceted diamond icon suitable for the macOS menu bar.
+    /// Uses solid black on transparent — macOS template rendering handles light/dark.
+    private static func drawTrayDiamond(size: CGFloat) -> NSImage {
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let cx = rect.midX, cy = rect.midY
+            let r = min(rect.width, rect.height) * 0.44
+
+            let top    = NSPoint(x: cx, y: cy + r)
+            let bottom = NSPoint(x: cx, y: cy - r)
+            let left   = NSPoint(x: cx - r * 0.82, y: cy + r * 0.05)
+            let right  = NSPoint(x: cx + r * 0.82, y: cy + r * 0.05)
+
+            // Crown inner points
+            let itl = NSPoint(x: cx - r * 0.3, y: cy + r * 0.42)
+            let itr = NSPoint(x: cx + r * 0.3, y: cy + r * 0.42)
+
+            NSColor.black.setStroke()
+            NSColor.black.withAlphaComponent(0.15).setFill()
+
+            // Outer diamond
+            let outline = NSBezierPath()
+            outline.move(to: top)
+            outline.line(to: left)
+            outline.line(to: bottom)
+            outline.line(to: right)
+            outline.close()
+            outline.lineWidth = 1.2
+            outline.fill()
+            outline.stroke()
+
+            // Crown facet (filled darker)
+            let crown = NSBezierPath()
+            crown.move(to: top)
+            crown.line(to: itl)
+            crown.line(to: itr)
+            crown.close()
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            crown.fill()
+
+            // Inner facet lines
+            NSColor.black.withAlphaComponent(0.5).setStroke()
+            let lines: [(NSPoint, NSPoint)] = [
+                (itl, itr), (itl, left), (itr, right),
+                (itl, bottom), (itr, bottom),
+                (NSPoint(x: cx, y: cy + r * 0.42), bottom),
+            ]
+            for (a, b) in lines {
+                let line = NSBezierPath()
+                line.move(to: a)
+                line.line(to: b)
+                line.lineWidth = 0.7
+                line.stroke()
+            }
+            return true
+        }
+        img.isTemplate = true
+        return img
     }
 
     private static func loadSVG(named name: String, size: CGFloat, isTemplate: Bool = false) -> NSImage? {
