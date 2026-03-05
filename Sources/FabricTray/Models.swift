@@ -276,7 +276,7 @@ struct FabricCapacity: Hashable {
 
     var isActive: Bool { state == "Active" }
     var isPaused: Bool { state == "Paused" || state == "Suspended" }
-    var canPauseResume: Bool { armResourceId != nil && !sku.isEmpty && licenseType == "Fabric" }
+    var canPauseResume: Bool { armResourceId != nil && !sku.isEmpty }
 
     // MARK: - Capacity Units & Pricing
 

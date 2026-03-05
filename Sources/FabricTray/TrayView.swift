@@ -210,8 +210,10 @@ struct TrayView: View {
             if appState.isSignedIn {
                 Button {
                     if appState.currentPath.isRoot {
+                        appState.pendingActionItemID = "__root__"
                         appState.requestCreateWorkspace()
                     } else {
+                        appState.pendingActionItemID = "__root__"
                         appState.requestCreateItem()
                     }
                 } label: {
@@ -223,6 +225,15 @@ struct TrayView: View {
                 .help(appState.currentPath.isRoot ? "New workspace (⌘N)" : "New item (⌘N)")
                 .keyboardShortcut("n")
                 .accessibilityLabel(appState.currentPath.isRoot ? "New workspace" : "New item")
+                .popover(isPresented: Binding(
+                    get: { appState.pendingAction != nil && appState.pendingActionItemID == "__root__" },
+                    set: { if !$0 { appState.dismissAction(); appState.pendingActionItemID = nil } }
+                ), arrowEdge: .bottom) {
+                    ActionConfirmationView()
+                        .environmentObject(appState)
+                        .environmentObject(prefs)
+                        .frame(width: floor(280 * prefs.density.scale))
+                }
 
                 Button { isSearchFocused = true } label: { EmptyView() }
                     .keyboardShortcut("f")
@@ -870,39 +881,6 @@ struct TrayView: View {
                             .foregroundStyle(Palette.success)
                     }
                     Spacer()
-                    // Pause / Resume button
-                    if cap.canPauseResume {
-                        if appState.capacityActionInProgress == cap.id {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .frame(width: d.progressSize, height: d.progressSize)
-                        } else {
-                            Button {
-                                Task {
-                                    if cap.isActive {
-                                        await appState.pauseCapacity(cap)
-                                    } else {
-                                        await appState.resumeCapacity(cap)
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: d.spacingXS) {
-                                    Image(systemName: cap.isActive ? "pause.fill" : "play.fill")
-                                        .font(.system(size: d.fontMicro))
-                                    Text(cap.isActive ? "Pause" : "Resume")
-                                        .font(.system(size: d.fontCaption, weight: .medium))
-                                }
-                                .foregroundStyle(cap.isActive ? Palette.warning : Palette.success)
-                                .padding(.horizontal, d.padSM)
-                                .padding(.vertical, d.padMicro)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .strokeBorder(cap.isActive ? Palette.warning : Palette.success, lineWidth: 0.5)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
                 }
             } else if cap.licenseType == "Trial" {
                 HStack(spacing: d.spacingSM) {
@@ -912,6 +890,45 @@ struct TrayView: View {
                     Text("Trial — Free")
                         .font(.system(size: d.fontCaption, weight: .medium))
                         .foregroundStyle(Palette.success)
+                }
+            }
+            // Pause / Resume button (always shown when available)
+            if cap.canPauseResume {
+                HStack {
+                    if appState.capacityActionInProgress == cap.id {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: d.progressSize, height: d.progressSize)
+                        Text(cap.isActive ? "Pausing…" : "Resuming…")
+                            .font(.system(size: d.fontCaption, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            Task {
+                                if cap.isActive {
+                                    await appState.pauseCapacity(cap)
+                                } else {
+                                    await appState.resumeCapacity(cap)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: d.spacingXS) {
+                                Image(systemName: cap.isActive ? "pause.fill" : "play.fill")
+                                    .font(.system(size: d.fontMicro))
+                                Text(cap.isActive ? "Pause Capacity" : "Resume Capacity")
+                                    .font(.system(size: d.fontCaption, weight: .medium))
+                            }
+                            .foregroundStyle(cap.isActive ? Palette.warning : Palette.success)
+                            .padding(.horizontal, d.padSM)
+                            .padding(.vertical, d.padXS)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .strokeBorder(cap.isActive ? Palette.warning : Palette.success, lineWidth: 0.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
                 }
             }
             // Mini spend gauge
