@@ -61,14 +61,15 @@ final class AppState: ObservableObject {
             let key = ws.capacityId ?? ""
             grouped[key, default: []].append(ws)
         }
-        // Build capacity map from both self.capacities AND per-workspace capacity data
+        // Build capacity map — prioritize self.capacities (has ARM data) over workspace data
         var capMap: [String: FabricCapacity] = [:]
-        for cap in capacities { capMap[cap.id] = cap }
         for ws in wsItems {
             if let capId = ws.capacityId, let cap = ws.capacity, capMap[capId] == nil {
                 capMap[capId] = cap
             }
         }
+        // Overwrite with self.capacities which have ARM resource IDs, SKU, etc.
+        for cap in capacities { capMap[cap.id] = cap }
         var result: [(FabricCapacity?, [FabricItem])] = []
 
         // Known capacities first (active then inactive, alphabetical)
@@ -767,17 +768,30 @@ final class AppState: ObservableObject {
         var capsMap = await capsTask
         let roles = await rolesTask
 
-        // For capacity IDs not returned by the Fabric API, try Azure Resource Manager
+        // For capacity IDs not returned by the Fabric API, try Azure Resource Manager.
+        // Also merge ARM data for ALL capacities (ARM has armResourceId needed for pause/resume).
         let unknownCapIds = Set(
             allItems.compactMap { $0.capacityId }.filter { !$0.isEmpty && capsMap[$0] == nil }
         )
-        if !unknownCapIds.isEmpty {
-            // Try ARM API — uses same identity, different scope
-            let armCaps = await fetchCapacitiesViaARM()
-            for (k, v) in armCaps where capsMap[k] == nil {
+        // Always fetch ARM capacities for armResourceId and pause/resume support
+        let armCaps = await fetchCapacitiesViaARM()
+        for (k, v) in armCaps {
+            if let existing = capsMap[k] {
+                // Merge: keep existing data but add ARM resource ID
+                capsMap[k] = FabricCapacity(
+                    id: existing.id,
+                    displayName: v.displayName.isEmpty ? existing.displayName : v.displayName,
+                    sku: v.sku.isEmpty ? existing.sku : v.sku,
+                    region: v.region.isEmpty ? existing.region : v.region,
+                    state: v.state.isEmpty ? existing.state : v.state,
+                    armResourceId: v.armResourceId
+                )
+            } else {
                 capsMap[k] = v
             }
+        }
 
+        if !unknownCapIds.isEmpty {
             // For anything still unknown, try direct Fabric capacity endpoint
             let stillUnknown = unknownCapIds.filter { capsMap[$0] == nil }
             if !stillUnknown.isEmpty {
@@ -796,6 +810,9 @@ final class AppState: ObservableObject {
         }
 
         self.capacities = Array(capsMap.values).sorted { $0.displayName < $1.displayName }
+        for cap in self.capacities {
+            NSLog("[FabricTray] Capacity: %@ | SKU: %@ | ARM: %@ | canPauseResume: %d", cap.displayName, cap.sku, cap.armResourceId ?? "nil", cap.canPauseResume ? 1 : 0)
+        }
 
         guard !capsMap.isEmpty || !roles.isEmpty else { return }
         allItems = allItems.map { item in
@@ -865,9 +882,15 @@ final class AppState: ObservableObject {
     /// Fetch Fabric capacities via Azure Resource Manager using a separate ARM-scoped token.
     private func fetchCapacitiesViaARM() async -> [String: FabricCapacity] {
         guard let armToken = try? await authService.armAccessToken(configuration: config) else {
+            NSLog("[FabricTray] ARM token fetch failed — cannot list capacities via ARM")
             return [:]
         }
-        return await api.listCapacitiesViaARM(armAccessToken: armToken)
+        let result = await api.listCapacitiesViaARM(armAccessToken: armToken)
+        NSLog("[FabricTray] ARM returned %d capacities", result.count)
+        for (k, v) in result {
+            NSLog("[FabricTray] ARM cap: %@ -> %@ (SKU: %@, ARM ID: %@)", k, v.displayName, v.sku, v.armResourceId ?? "nil")
+        }
+        return result
     }
 
     // MARK: - Capacity Pause / Resume

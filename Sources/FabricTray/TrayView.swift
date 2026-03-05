@@ -80,10 +80,6 @@ struct TrayView: View {
                 if appState.isSignedIn {
                     // Root: show capacities as top-level parents
                     if appState.currentPath.isRoot {
-                        if !appState.capacities.isEmpty {
-                            capacitySpendBar
-                            Divider().opacity(0.5)
-                        }
                         capacityFirstList
                     } else if appState.currentPath.isCapacityLevel {
                         // Capacity level: show workspaces in this capacity
