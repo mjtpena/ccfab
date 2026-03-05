@@ -103,7 +103,7 @@ struct TrayView: View {
         }
         .frame(width: prefs.density.windowWidth)
         .task {
-            if appState.isSignedIn && appState.allItems.isEmpty {
+            if appState.isSignedIn {
                 await appState.refresh()
             }
         }
@@ -448,6 +448,16 @@ struct TrayView: View {
                 Text(toast)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    withAnimation { appState.toastMessage = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: d.fontBody))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
             }
             .padding(.horizontal, d.rowHPad)
             .padding(.vertical, d.padXS)
@@ -483,6 +493,15 @@ struct TrayView: View {
                     .foregroundStyle(Palette.destructive.opacity(0.8))
                     .accessibilityLabel("Retry failed action")
                 }
+                Button {
+                    withAnimation { appState.errorMessage = nil; appState.lastFailedAction = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: d.fontBody))
+                        .foregroundStyle(Palette.destructive.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss error")
             }
             .padding(.horizontal, d.rowHPad)
             .padding(.vertical, d.padXS)
