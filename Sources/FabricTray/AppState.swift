@@ -606,10 +606,13 @@ final class AppState: ObservableObject {
     }
 
     private func setupNotifications() {
-        // UNUserNotificationCenter requires a valid app bundle; skip gracefully
-        // when running as a bare executable (e.g. `swift run` without .app wrapper).
+        // UNUserNotificationCenter.current() can crash if the app bundle
+        // is ad-hoc signed or not properly registered with the system.
+        // Wrap in ObjC exception handler to prevent fatal abort.
         guard Bundle.main.bundleIdentifier != nil else { return }
-        let center = UNUserNotificationCenter.current()
+        guard let centerClass = NSClassFromString("UNUserNotificationCenter"),
+              let center = (centerClass as AnyObject).perform?(NSSelectorFromString("currentNotificationCenter"))?.takeUnretainedValue() as? UNUserNotificationCenter
+        else { return }
         center.delegate = notificationDelegate
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
@@ -635,7 +638,10 @@ final class AppState: ObservableObject {
     }
 
     private func sendJobNotification(_ job: JobRun) {
-        guard Bundle.main.bundleIdentifier != nil else { return }
+        guard Bundle.main.bundleIdentifier != nil,
+              let centerClass = NSClassFromString("UNUserNotificationCenter"),
+              let center = (centerClass as AnyObject).perform?(NSSelectorFromString("currentNotificationCenter"))?.takeUnretainedValue() as? UNUserNotificationCenter
+        else { return }
         let content = UNMutableNotificationContent()
         switch job.status {
         case .completed:
@@ -662,7 +668,7 @@ final class AppState: ObservableObject {
             identifier: "job-\(job.id)-\(job.status.rawValue)",
             content: content, trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        center.add(request)
     }
 
     private func updateTrayStatus() {
