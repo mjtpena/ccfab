@@ -103,6 +103,31 @@ final class MicrosoftAuthService: NSObject, ASWebAuthenticationPresentationConte
         throw AuthServiceError.invalidResponse
     }
 
+    /// Exchange the stored refresh token for a token scoped to Azure Resource Manager.
+    func armAccessToken(configuration: AppConfiguration) async throws -> String {
+        guard let existing = try tokenStore.read(),
+              let refreshToken = existing.refreshToken else {
+            throw AuthServiceError.invalidResponse
+        }
+        guard let url = URL(string: "https://login.microsoftonline.com/\(configuration.sanitizedTenantID)/oauth2/v2.0/token") else {
+            throw AuthServiceError.invalidEndpoint
+        }
+        let body = [
+            "grant_type": "refresh_token",
+            "client_id": configuration.sanitizedClientID,
+            "refresh_token": refreshToken,
+            "scope": "https://management.azure.com/.default offline_access"
+        ]
+        let (data, _) = try await performFormRequest(url: url, body: body, acceptedStatusCodes: 200..<500)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let response = try decoder.decode(TokenResponse.self, from: data)
+        guard let accessToken = response.accessToken else {
+            throw AuthServiceError.server(response.errorDescription ?? "ARM token exchange failed.")
+        }
+        return accessToken
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
     }

@@ -765,21 +765,30 @@ final class AppState: ObservableObject {
         var capsMap = await capsTask
         let roles = await rolesTask
 
-        // Try to fetch details for capacity IDs not returned by the list endpoint
+        // For capacity IDs not returned by the Fabric API, try Azure Resource Manager
         let unknownCapIds = Set(
             allItems.compactMap { $0.capacityId }.filter { !$0.isEmpty && capsMap[$0] == nil }
         )
         if !unknownCapIds.isEmpty {
-            let apiClient = api
-            await withTaskGroup(of: (String, FabricCapacity?).self) { group in
-                for capId in unknownCapIds {
-                    group.addTask {
-                        let cap = try? await apiClient.getCapacity(id: capId, accessToken: accessToken)
-                        return (capId, cap)
+            // Try ARM API — uses same identity, different scope
+            let armCaps = await fetchCapacitiesViaARM()
+            for (k, v) in armCaps where capsMap[k] == nil {
+                capsMap[k] = v
+            }
+
+            // For anything still unknown, try direct Fabric capacity endpoint
+            let stillUnknown = unknownCapIds.filter { capsMap[$0] == nil }
+            if !stillUnknown.isEmpty {
+                let apiClient = api
+                await withTaskGroup(of: (String, FabricCapacity?).self) { group in
+                    for capId in stillUnknown {
+                        group.addTask {
+                            return (capId, await apiClient.getCapacity(id: capId, accessToken: accessToken))
+                        }
                     }
-                }
-                for await (capId, cap) in group {
-                    if let cap = cap { capsMap[capId] = cap }
+                    for await (capId, cap) in group {
+                        if let cap = cap { capsMap[capId] = cap }
+                    }
                 }
             }
         }
@@ -824,6 +833,14 @@ final class AppState: ObservableObject {
             }
             return result
         }
+    }
+
+    /// Fetch Fabric capacities via Azure Resource Manager using a separate ARM-scoped token.
+    private func fetchCapacitiesViaARM() async -> [String: FabricCapacity] {
+        guard let armToken = try? await authService.armAccessToken(configuration: config) else {
+            return [:]
+        }
+        return await api.listCapacitiesViaARM(armAccessToken: armToken)
     }
 
     // MARK: - Favorites

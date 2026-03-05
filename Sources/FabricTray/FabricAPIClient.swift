@@ -46,11 +46,15 @@ final class FabricAPIClient: @unchecked Sendable {
         return map
     }
 
-    /// Fetch a single capacity by ID (works for contributors, not just admins).
-    func getCapacity(id: String, accessToken: String) async throws -> FabricCapacity? {
-        let data = try await get(path: "v1/capacities/\(id)", accessToken: accessToken)
-        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-        return parseCapacity(obj)
+    /// Fetch a single capacity by ID. Returns nil on 403/404 (no access).
+    func getCapacity(id: String, accessToken: String) async -> FabricCapacity? {
+        do {
+            let data = try await get(path: "v1/capacities/\(id)", accessToken: accessToken)
+            guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            return parseCapacity(obj)
+        } catch {
+            return nil
+        }
     }
 
     private func parseCapacity(_ obj: [String: Any]) -> FabricCapacity? {
@@ -62,6 +66,63 @@ final class FabricAPIClient: @unchecked Sendable {
             region: (obj["region"] as? String) ?? "",
             state: (obj["state"] as? String) ?? ""
         )
+    }
+
+    // MARK: - Azure Resource Manager (ARM) Capacities
+
+    /// List Fabric capacities via Azure Resource Manager API.
+    /// Uses a separate ARM-scoped token. Returns capacities the user can see as Azure Reader+.
+    func listCapacitiesViaARM(armAccessToken: String) async -> [String: FabricCapacity] {
+        // First list subscriptions
+        guard let subsURL = URL(string: "https://management.azure.com/subscriptions?api-version=2022-12-01") else { return [:] }
+        var subsReq = URLRequest(url: subsURL)
+        subsReq.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+        subsReq.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        guard let (subsData, subsResp) = try? await session.data(for: subsReq),
+              let subsHttp = subsResp as? HTTPURLResponse, subsHttp.statusCode == 200,
+              let subsRoot = (try? JSONSerialization.jsonObject(with: subsData)) as? [String: Any],
+              let subs = subsRoot["value"] as? [[String: Any]] else { return [:] }
+
+        var result: [String: FabricCapacity] = [:]
+        for sub in subs {
+            guard let subId = sub["subscriptionId"] as? String else { continue }
+            let caps = await listFabricCapacitiesInSubscription(subscriptionId: subId, armAccessToken: armAccessToken)
+            for (k, v) in caps { result[k] = v }
+        }
+        return result
+    }
+
+    private func listFabricCapacitiesInSubscription(subscriptionId: String, armAccessToken: String) async -> [String: FabricCapacity] {
+        guard let url = URL(string: "https://management.azure.com/subscriptions/\(subscriptionId)/providers/Microsoft.Fabric/capacities?api-version=2023-11-01") else { return [:] }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        guard let (data, resp) = try? await session.data(for: request),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let items = root["value"] as? [[String: Any]] else { return [:] }
+
+        var map: [String: FabricCapacity] = [:]
+        for item in items {
+            // ARM returns: name, id (ARM resource ID), location, sku.name, properties.state
+            guard let props = item["properties"] as? [String: Any] else { continue }
+            let _ = item["id"] as? String ?? ""
+            let name = (item["name"] as? String) ?? ""
+            let location = (item["location"] as? String) ?? ""
+            let skuObj = item["sku"] as? [String: Any]
+            let sku = (skuObj?["name"] as? String) ?? ""
+            let state = (props["state"] as? String) ?? ""
+            // The Fabric capacity ID is in properties.capacityId (GUID), not the ARM resource ID
+            let fabricId = (props["capacityId"] as? String) ?? ""
+            guard !fabricId.isEmpty else { continue }
+            map[fabricId] = FabricCapacity(
+                id: fabricId, displayName: name, sku: sku,
+                region: location, state: state
+            )
+        }
+        return map
     }
 
     // MARK: - Items in workspace
