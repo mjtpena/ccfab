@@ -774,10 +774,10 @@ struct TrayView: View {
 
     /// Rich header for a capacity we have full details on.
     private func capacityGroupHeader(_ cap: FabricCapacity, workspaceCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
+            // Top row: SKU badge, name, status
             HStack(spacing: 6) {
                 if !cap.sku.isEmpty {
-                    // SKU badge (known capacity)
                     Text(cap.sku)
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
@@ -785,7 +785,6 @@ struct TrayView: View {
                         .padding(.vertical, 2)
                         .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
                 } else {
-                    // Placeholder badge (unknown capacity — no admin access)
                     Image(systemName: "lock.shield")
                         .font(.system(size: 10))
                         .foregroundStyle(.orange)
@@ -819,28 +818,87 @@ struct TrayView: View {
                 }
                 Spacer()
                 if !cap.sku.isEmpty {
-                    VStack(alignment: .trailing, spacing: 1) {
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(cap.isActive ? Palette.success : Palette.destructive)
-                                .frame(width: 6, height: 6)
-                            Text(cap.isActive ? "Active" : "Paused")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(cap.isActive ? Palette.success : Palette.destructive)
-                        }
-                        if cap.isActive && cap.hourlyRate > 0 {
-                            Text("\(formatCost(cap.hourlyRate))/hr")
-                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(spendColor(cap.hourlyRate))
-                        } else if cap.licenseType == "Trial" {
-                            Text("Free")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Palette.success)
-                        }
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(cap.isActive ? Palette.success : Palette.destructive)
+                            .frame(width: 6, height: 6)
+                        Text(cap.isActive ? "Active" : "Paused")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(cap.isActive ? Palette.success : Palette.destructive)
                     }
                 }
             }
-            // Mini spend gauge (only for known capacities with cost)
+            // Burn rate row (per capacity)
+            if !cap.sku.isEmpty && cap.hourlyRate > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(cap.isActive ? spendColor(cap.hourlyRate) : .secondary)
+                    if cap.isActive {
+                        Text("\(formatCost(cap.hourlyRate))/hr")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(spendColor(cap.hourlyRate))
+                        Text("·").foregroundStyle(.quaternary)
+                        Text("~\(formatCost(cap.monthlyEstimate))/mo")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if let util = appState.capacityUtilization[cap.id] {
+                            Text("·").foregroundStyle(.quaternary)
+                            Text("\(Int(util))% CU")
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundStyle(utilizationColor(util))
+                        }
+                    } else {
+                        Text("Paused — $0/hr")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.success)
+                    }
+                    Spacer()
+                    // Pause / Resume button
+                    if cap.canPauseResume {
+                        if appState.capacityActionInProgress == cap.id {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Button {
+                                Task {
+                                    if cap.isActive {
+                                        await appState.pauseCapacity(cap)
+                                    } else {
+                                        await appState.resumeCapacity(cap)
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: cap.isActive ? "pause.fill" : "play.fill")
+                                        .font(.system(size: 8))
+                                    Text(cap.isActive ? "Pause" : "Resume")
+                                        .font(.system(size: 9, weight: .medium))
+                                }
+                                .foregroundStyle(cap.isActive ? Palette.warning : Palette.success)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .strokeBorder(cap.isActive ? Palette.warning : Palette.success, lineWidth: 0.5)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            } else if cap.licenseType == "Trial" {
+                HStack(spacing: 4) {
+                    Image(systemName: "gift.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Palette.success)
+                    Text("Trial — Free")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Palette.success)
+                }
+            }
+            // Mini spend gauge
             if !cap.sku.isEmpty && cap.isActive && cap.hourlyRate > 0 {
                 let maxRate = max(appState.capacities.map(\.hourlyRate).max() ?? 1, 1)
                 GeometryReader { geo in
@@ -849,7 +907,6 @@ struct TrayView: View {
                         .frame(width: geo.size.width * CGFloat(cap.hourlyRate / maxRate), height: 3)
                 }
                 .frame(height: 3)
-                .padding(.top, 4)
             }
         }
         .padding(.horizontal, 10)
@@ -902,6 +959,12 @@ struct TrayView: View {
         if hourlyRate <= 0 { return .secondary }
         if hourlyRate < 5 { return Palette.success }
         if hourlyRate < 20 { return Palette.warning }
+        return Palette.destructive
+    }
+
+    private func utilizationColor(_ pct: Double) -> Color {
+        if pct < 50 { return Palette.success }
+        if pct < 80 { return Palette.warning }
         return Palette.destructive
     }
 

@@ -108,21 +108,108 @@ final class FabricAPIClient: @unchecked Sendable {
         for item in items {
             // ARM returns: name, id (ARM resource ID), location, sku.name, properties.state
             guard let props = item["properties"] as? [String: Any] else { continue }
-            let _ = item["id"] as? String ?? ""
+            let armId = item["id"] as? String ?? ""
             let name = (item["name"] as? String) ?? ""
             let location = (item["location"] as? String) ?? ""
             let skuObj = item["sku"] as? [String: Any]
             let sku = (skuObj?["name"] as? String) ?? ""
             let state = (props["state"] as? String) ?? ""
-            // The Fabric capacity ID is in properties.capacityId (GUID), not the ARM resource ID
             let fabricId = (props["capacityId"] as? String) ?? ""
             guard !fabricId.isEmpty else { continue }
             map[fabricId] = FabricCapacity(
                 id: fabricId, displayName: name, sku: sku,
-                region: location, state: state
+                region: location, state: state, armResourceId: armId
             )
         }
         return map
+    }
+
+    /// Suspend (pause) a Fabric capacity via ARM.
+    func suspendCapacity(armResourceId: String, armAccessToken: String) async throws {
+        guard let url = URL(string: "https://management.azure.com\(armResourceId)/suspend?api-version=2023-11-01") else {
+            throw FabricAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data()
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw FabricAPIError.unexpectedStatus((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+    }
+
+    /// Resume a Fabric capacity via ARM.
+    func resumeCapacity(armResourceId: String, armAccessToken: String) async throws {
+        guard let url = URL(string: "https://management.azure.com\(armResourceId)/resume?api-version=2023-11-01") else {
+            throw FabricAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data()
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw FabricAPIError.unexpectedStatus((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+    }
+
+    /// Query Azure Monitor for capacity utilization metrics.
+    /// Returns the average CU utilization percentage over the last hour.
+    func capacityUtilization(armResourceId: String, armAccessToken: String) async -> Double? {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let oneHourAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let timespan = "\(oneHourAgo)/\(now)"
+
+        // First discover available metrics, then try known metric names
+        let metricNames = ["CapacityUtilization", "overload_intervals_in_last_one_minutes",
+                           "capacity_metric_cu_utilization", "fabricCapacityUtilization"]
+
+        for metricName in metricNames {
+            guard let url = URL(string: "https://management.azure.com\(armResourceId)/providers/microsoft.insights/metrics?api-version=2018-01-01&metricnames=\(metricName)&timespan=\(timespan)&aggregation=Average") else { continue }
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+            guard let (data, resp) = try? await session.data(for: request),
+                  let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let values = root["value"] as? [[String: Any]],
+                  let first = values.first,
+                  let timeseries = first["timeseries"] as? [[String: Any]],
+                  let ts = timeseries.first,
+                  let dataPoints = ts["data"] as? [[String: Any]] else { continue }
+
+            // Get the most recent non-nil average
+            for point in dataPoints.reversed() {
+                if let avg = point["average"] as? Double {
+                    return avg
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Discover all available metric names for a Fabric capacity resource.
+    func discoverCapacityMetrics(armResourceId: String, armAccessToken: String) async -> [String] {
+        guard let url = URL(string: "https://management.azure.com\(armResourceId)/providers/microsoft.insights/metricdefinitions?api-version=2018-01-01") else { return [] }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        guard let (data, resp) = try? await session.data(for: request),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let values = root["value"] as? [[String: Any]] else { return [] }
+
+        return values.compactMap { item -> String? in
+            guard let name = item["name"] as? [String: Any] else { return nil }
+            return name["value"] as? String
+        }
     }
 
     // MARK: - Items in workspace

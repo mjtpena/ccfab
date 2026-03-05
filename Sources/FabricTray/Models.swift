@@ -260,7 +260,9 @@ struct FabricCapacity: Hashable {
     let displayName: String
     let sku: String
     let region: String
-    let state: String
+    var state: String
+    /// Full ARM resource ID, e.g. /subscriptions/.../providers/Microsoft.Fabric/capacities/capName
+    var armResourceId: String?
 
     /// License family derived from SKU prefix
     var licenseType: String {
@@ -273,6 +275,8 @@ struct FabricCapacity: Hashable {
     }
 
     var isActive: Bool { state == "Active" }
+    var isPaused: Bool { state == "Paused" || state == "Suspended" }
+    var canPauseResume: Bool { armResourceId != nil && !sku.isEmpty && licenseType == "Fabric" }
 
     // MARK: - Capacity Units & Pricing
 

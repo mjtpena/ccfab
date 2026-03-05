@@ -41,6 +41,8 @@ final class AppState: ObservableObject {
 
     // Capacities
     @Published var capacities: [FabricCapacity] = []
+    /// CU utilization % per capacity ID (from Azure Monitor)
+    @Published var capacityUtilization: [String: Double] = [:]
 
     /// Total estimated hourly cost across all active capacities (USD).
     var totalHourlyBurn: Double {
@@ -808,6 +810,31 @@ final class AppState: ObservableObject {
                 sensitivityLabel: item.sensitivityLabel
             )
         }
+
+        // Fetch real utilization metrics via Azure Monitor for capacities with ARM IDs
+        await fetchCapacityUtilization()
+    }
+
+    private func fetchCapacityUtilization() async {
+        let capsWithARM = capacities.filter { $0.armResourceId != nil && $0.isActive }
+        guard !capsWithARM.isEmpty,
+              let armToken = try? await authService.armAccessToken(configuration: config) else { return }
+        let apiClient = api
+        await withTaskGroup(of: (String, Double?).self) { group in
+            for cap in capsWithARM {
+                group.addTask {
+                    let util = await apiClient.capacityUtilization(
+                        armResourceId: cap.armResourceId!, armAccessToken: armToken
+                    )
+                    return (cap.id, util)
+                }
+            }
+            for await (capId, util) in group {
+                if let util = util {
+                    self.capacityUtilization[capId] = util
+                }
+            }
+        }
     }
 
     private func fetchRolesMap(accessToken: String) async -> [String: WorkspaceRole] {
@@ -841,6 +868,49 @@ final class AppState: ObservableObject {
             return [:]
         }
         return await api.listCapacitiesViaARM(armAccessToken: armToken)
+    }
+
+    // MARK: - Capacity Pause / Resume
+
+    @Published var capacityActionInProgress: String?
+
+    func pauseCapacity(_ cap: FabricCapacity) async {
+        guard let armId = cap.armResourceId else {
+            toastMessage = "Cannot pause: missing ARM resource info"
+            return
+        }
+        capacityActionInProgress = cap.id
+        do {
+            let armToken = try await authService.armAccessToken(configuration: config)
+            try await api.suspendCapacity(armResourceId: armId, armAccessToken: armToken)
+            // Update local state
+            if let idx = capacities.firstIndex(where: { $0.id == cap.id }) {
+                capacities[idx].state = "Paused"
+            }
+            toastMessage = "\(cap.displayName) paused"
+        } catch {
+            toastMessage = "Failed to pause: \(error.localizedDescription)"
+        }
+        capacityActionInProgress = nil
+    }
+
+    func resumeCapacity(_ cap: FabricCapacity) async {
+        guard let armId = cap.armResourceId else {
+            toastMessage = "Cannot resume: missing ARM resource info"
+            return
+        }
+        capacityActionInProgress = cap.id
+        do {
+            let armToken = try await authService.armAccessToken(configuration: config)
+            try await api.resumeCapacity(armResourceId: armId, armAccessToken: armToken)
+            if let idx = capacities.firstIndex(where: { $0.id == cap.id }) {
+                capacities[idx].state = "Active"
+            }
+            toastMessage = "\(cap.displayName) resumed"
+        } catch {
+            toastMessage = "Failed to resume: \(error.localizedDescription)"
+        }
+        capacityActionInProgress = nil
     }
 
     // MARK: - Favorites
