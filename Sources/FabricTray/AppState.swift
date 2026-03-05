@@ -531,6 +531,9 @@ final class AppState: ObservableObject {
     }
 
     private func setupNotifications() {
+        // UNUserNotificationCenter requires a valid app bundle; skip gracefully
+        // when running as a bare executable (e.g. `swift run` without .app wrapper).
+        guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = notificationDelegate
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
@@ -557,6 +560,7 @@ final class AppState: ObservableObject {
     }
 
     private func sendJobNotification(_ job: JobRun) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         switch job.status {
         case .completed:
