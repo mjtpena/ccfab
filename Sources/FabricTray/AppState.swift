@@ -787,7 +787,22 @@ final class AppState: ObservableObject {
                     armResourceId: v.armResourceId
                 )
             } else {
-                capsMap[k] = v
+                // Try matching by display name (for PowerBIDedicated which lacks fabricId)
+                if let matchKey = capsMap.first(where: {
+                    $0.value.displayName.lowercased() == v.displayName.lowercased() && $0.value.armResourceId == nil
+                })?.key {
+                    let existing = capsMap[matchKey]!
+                    capsMap[matchKey] = FabricCapacity(
+                        id: existing.id,
+                        displayName: v.displayName.isEmpty ? existing.displayName : v.displayName,
+                        sku: v.sku.isEmpty ? existing.sku : v.sku,
+                        region: v.region.isEmpty ? existing.region : v.region,
+                        state: v.state.isEmpty ? existing.state : v.state,
+                        armResourceId: v.armResourceId
+                    )
+                } else {
+                    capsMap[k] = v
+                }
             }
         }
 
@@ -810,8 +825,18 @@ final class AppState: ObservableObject {
         }
 
         self.capacities = Array(capsMap.values).sorted { $0.displayName < $1.displayName }
-        for cap in self.capacities {
-            NSLog("[FabricTray] Capacity: %@ | SKU: %@ | ARM: %@ | canPauseResume: %d", cap.displayName, cap.sku, cap.armResourceId ?? "nil", cap.canPauseResume ? 1 : 0)
+        // Debug: write capacity info to file
+        let debugLines = self.capacities.map { cap in
+            "Capacity: \(cap.displayName) | SKU: \(cap.sku) | ARM: \(cap.armResourceId ?? "nil") | canPauseResume: \(cap.canPauseResume) | state: \(cap.state)"
+        }
+        let debugStr = "[\(Date())] enrichWorkspaces — \(capsMap.count) in capsMap, \(self.capacities.count) total\n" + debugLines.joined(separator: "\n") + "\n\n"
+        if let data = debugStr.data(using: .utf8) {
+            let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
+            if FileManager.default.fileExists(atPath: logFile.path) {
+                if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
+            } else {
+                try? data.write(to: logFile)
+            }
         }
 
         guard !capsMap.isEmpty || !roles.isEmpty else { return }
@@ -881,14 +906,23 @@ final class AppState: ObservableObject {
 
     /// Fetch Fabric capacities via Azure Resource Manager using a separate ARM-scoped token.
     private func fetchCapacitiesViaARM() async -> [String: FabricCapacity] {
+        let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
+        func appendLog(_ msg: String) {
+            if let data = "[\(Date())] \(msg)\n".data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: logFile.path) {
+                    if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
+                } else { try? data.write(to: logFile) }
+            }
+        }
         guard let armToken = try? await authService.armAccessToken(configuration: config) else {
-            NSLog("[FabricTray] ARM token fetch failed — cannot list capacities via ARM")
+            appendLog("ARM token fetch FAILED")
             return [:]
         }
+        appendLog("ARM token acquired, listing capacities...")
         let result = await api.listCapacitiesViaARM(armAccessToken: armToken)
-        NSLog("[FabricTray] ARM returned %d capacities", result.count)
+        appendLog("ARM returned \(result.count) capacities")
         for (k, v) in result {
-            NSLog("[FabricTray] ARM cap: %@ -> %@ (SKU: %@, ARM ID: %@)", k, v.displayName, v.sku, v.armResourceId ?? "nil")
+            appendLog("  ARM cap: \(k) -> \(v.displayName) (SKU: \(v.sku), ARM ID: \(v.armResourceId ?? "nil"))")
         }
         return result
     }

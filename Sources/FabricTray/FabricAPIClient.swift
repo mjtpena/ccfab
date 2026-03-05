@@ -73,6 +73,15 @@ final class FabricAPIClient: @unchecked Sendable {
     /// List Fabric capacities via Azure Resource Manager API.
     /// Uses a separate ARM-scoped token. Returns capacities the user can see as Azure Reader+.
     func listCapacitiesViaARM(armAccessToken: String) async -> [String: FabricCapacity] {
+        let logFile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("fabrictray-debug.log")
+        func appendLog(_ msg: String) {
+            if let data = "[\(Date())] ARM: \(msg)\n".data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: logFile.path) {
+                    if let fh = try? FileHandle(forWritingTo: logFile) { fh.seekToEndOfFile(); fh.write(data); fh.closeFile() }
+                } else { try? data.write(to: logFile) }
+            }
+        }
+
         // First list subscriptions
         guard let subsURL = URL(string: "https://management.azure.com/subscriptions?api-version=2022-12-01") else { return [:] }
         var subsReq = URLRequest(url: subsURL)
@@ -80,53 +89,96 @@ final class FabricAPIClient: @unchecked Sendable {
         subsReq.setValue("application/json", forHTTPHeaderField: "Accept")
 
         guard let (subsData, subsResp) = try? await session.data(for: subsReq),
-              let subsHttp = subsResp as? HTTPURLResponse, subsHttp.statusCode == 200,
+              let subsHttp = subsResp as? HTTPURLResponse else {
+            appendLog("Subscriptions request failed")
+            return [:]
+        }
+        appendLog("Subscriptions response: HTTP \(subsHttp.statusCode)")
+
+        guard subsHttp.statusCode == 200,
               let subsRoot = (try? JSONSerialization.jsonObject(with: subsData)) as? [String: Any],
-              let subs = subsRoot["value"] as? [[String: Any]] else { return [:] }
+              let subs = subsRoot["value"] as? [[String: Any]] else {
+            let body = String(data: subsData, encoding: .utf8) ?? "nil"
+            appendLog("Subscriptions parse failed or non-200. Body: \(body.prefix(500))")
+            return [:]
+        }
+
+        appendLog("Found \(subs.count) subscriptions")
 
         var result: [String: FabricCapacity] = [:]
         for sub in subs {
             guard let subId = sub["subscriptionId"] as? String else { continue }
-            let caps = await listFabricCapacitiesInSubscription(subscriptionId: subId, armAccessToken: armAccessToken)
+            let subName = (sub["displayName"] as? String) ?? "?"
+            appendLog("Querying subscription: \(subName) (\(subId))")
+            let caps = await listFabricCapacitiesInSubscription(subscriptionId: subId, armAccessToken: armAccessToken, appendLog: appendLog)
+            appendLog("  -> \(caps.count) capacities found")
             for (k, v) in caps { result[k] = v }
         }
         return result
     }
 
-    private func listFabricCapacitiesInSubscription(subscriptionId: String, armAccessToken: String) async -> [String: FabricCapacity] {
-        guard let url = URL(string: "https://management.azure.com/subscriptions/\(subscriptionId)/providers/Microsoft.Fabric/capacities?api-version=2023-11-01") else { return [:] }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        guard let (data, resp) = try? await session.data(for: request),
-              let http = resp as? HTTPURLResponse, http.statusCode == 200,
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let items = root["value"] as? [[String: Any]] else { return [:] }
-
+    private func listFabricCapacitiesInSubscription(subscriptionId: String, armAccessToken: String, appendLog: (String) -> Void) async -> [String: FabricCapacity] {
+        // Query both resource providers — newer Microsoft.Fabric and older Microsoft.PowerBIDedicated
+        let providers = [
+            ("Microsoft.Fabric/capacities", "2023-11-01"),
+            ("Microsoft.PowerBIDedicated/capacities", "2021-01-01")
+        ]
         var map: [String: FabricCapacity] = [:]
-        for item in items {
-            // ARM returns: name, id (ARM resource ID), location, sku.name, properties.state
-            guard let props = item["properties"] as? [String: Any] else { continue }
-            let armId = item["id"] as? String ?? ""
-            let name = (item["name"] as? String) ?? ""
-            let location = (item["location"] as? String) ?? ""
-            let skuObj = item["sku"] as? [String: Any]
-            let sku = (skuObj?["name"] as? String) ?? ""
-            let state = (props["state"] as? String) ?? ""
-            let fabricId = (props["capacityId"] as? String) ?? ""
-            guard !fabricId.isEmpty else { continue }
-            map[fabricId] = FabricCapacity(
-                id: fabricId, displayName: name, sku: sku,
-                region: location, state: state, armResourceId: armId
-            )
+
+        for (provider, apiVersion) in providers {
+            guard let url = URL(string: "https://management.azure.com/subscriptions/\(subscriptionId)/providers/\(provider)?api-version=\(apiVersion)") else { continue }
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(armAccessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+            guard let (data, resp) = try? await session.data(for: request),
+                  let http = resp as? HTTPURLResponse else {
+                appendLog("  \(provider) request failed")
+                continue
+            }
+            appendLog("  \(provider): HTTP \(http.statusCode)")
+
+            guard http.statusCode == 200,
+                  let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let items = root["value"] as? [[String: Any]] else {
+                let body = String(data: data, encoding: .utf8) ?? "nil"
+                appendLog("  \(provider) parse failed. Body: \(body.prefix(500))")
+                continue
+            }
+
+            appendLog("  \(provider): \(items.count) items")
+            for item in items {
+                guard let props = item["properties"] as? [String: Any] else { continue }
+                let armId = item["id"] as? String ?? ""
+                let name = (item["name"] as? String) ?? ""
+                let location = (item["location"] as? String) ?? ""
+                let skuObj = item["sku"] as? [String: Any]
+                let sku = (skuObj?["name"] as? String) ?? ""
+                let state = (props["state"] as? String) ?? ""
+                // PowerBIDedicated uses "provisioningState" for lifecycle
+                let provState = (props["provisioningState"] as? String) ?? ""
+                let effectiveState = state.isEmpty ? provState : state
+                // Fabric capacities have "capacityId", PowerBI Dedicated might not
+                let fabricId = (props["capacityId"] as? String) ?? ""
+                appendLog("    item: \(name) | sku: \(sku) | state: \(effectiveState) | fabricId: \(fabricId) | armId: \(armId)")
+
+                // For PowerBIDedicated, the capacity GUID might be in a different field
+                // or may need to be matched by display name
+                let capId = fabricId.isEmpty ? armId : fabricId
+                guard !capId.isEmpty else { continue }
+                map[capId] = FabricCapacity(
+                    id: capId, displayName: name, sku: sku,
+                    region: location, state: effectiveState, armResourceId: armId
+                )
+            }
         }
         return map
     }
 
-    /// Suspend (pause) a Fabric capacity via ARM.
+    /// Suspend (pause) a capacity via ARM. Detects resource provider to use correct API version.
     func suspendCapacity(armResourceId: String, armAccessToken: String) async throws {
-        guard let url = URL(string: "https://management.azure.com\(armResourceId)/suspend?api-version=2023-11-01") else {
+        let apiVersion = armResourceId.contains("Microsoft.Fabric") ? "2023-11-01" : "2021-01-01"
+        guard let url = URL(string: "https://management.azure.com\(armResourceId)/suspend?api-version=\(apiVersion)") else {
             throw FabricAPIError.invalidResponse
         }
         var request = URLRequest(url: url)
@@ -141,9 +193,10 @@ final class FabricAPIClient: @unchecked Sendable {
         }
     }
 
-    /// Resume a Fabric capacity via ARM.
+    /// Resume a capacity via ARM. Detects resource provider to use correct API version.
     func resumeCapacity(armResourceId: String, armAccessToken: String) async throws {
-        guard let url = URL(string: "https://management.azure.com\(armResourceId)/resume?api-version=2023-11-01") else {
+        let apiVersion = armResourceId.contains("Microsoft.Fabric") ? "2023-11-01" : "2021-01-01"
+        guard let url = URL(string: "https://management.azure.com\(armResourceId)/resume?api-version=\(apiVersion)") else {
             throw FabricAPIError.invalidResponse
         }
         var request = URLRequest(url: url)
