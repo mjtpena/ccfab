@@ -50,7 +50,8 @@ final class AppState: ObservableObject {
     /// Estimated monthly cost across all active capacities (USD).
     var totalMonthlyEstimate: Double { totalHourlyBurn * 730.0 }
 
-    /// Workspaces grouped by their capacity ID. Unassigned workspaces are under nil key.
+    /// Workspaces grouped by their capacity. Groups with known capacity details show rich info;
+    /// workspaces on unknown capacities (no admin access) get a placeholder; unassigned get nil.
     var workspacesByCapacity: [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
         let wsItems = allItems.filter { $0.type == .workspace }
         var grouped: [String: [FabricItem]] = [:]
@@ -60,15 +61,34 @@ final class AppState: ObservableObject {
         }
         let capMap = Dictionary(uniqueKeysWithValues: capacities.map { ($0.id, $0) })
         var result: [(FabricCapacity?, [FabricItem])] = []
-        let capKeys = grouped.keys.filter { !$0.isEmpty }.sorted { a, b in
-            let capA = capMap[a]
-            let capB = capMap[b]
-            if capA?.isActive != capB?.isActive { return capA?.isActive == true }
-            return (capA?.displayName ?? "") < (capB?.displayName ?? "")
+
+        // Known capacities first (active then inactive, alphabetical)
+        let knownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] != nil }.sorted { a, b in
+            let capA = capMap[a]!
+            let capB = capMap[b]!
+            if capA.isActive != capB.isActive { return capA.isActive }
+            return capA.displayName < capB.displayName
         }
-        for key in capKeys {
+        for key in knownKeys {
             result.append((capMap[key], grouped[key] ?? []))
         }
+
+        // Unknown capacities (have ID but no admin details) — create placeholder
+        let unknownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] == nil }.sorted()
+        if !unknownKeys.isEmpty {
+            var unknownWS: [FabricItem] = []
+            for key in unknownKeys {
+                unknownWS.append(contentsOf: grouped[key] ?? [])
+            }
+            // Use a placeholder capacity to indicate "on capacity but details unavailable"
+            let placeholder = FabricCapacity(
+                id: "_unknown", displayName: "Capacity", sku: "",
+                region: "", state: "Active"
+            )
+            result.append((placeholder, unknownWS))
+        }
+
+        // No capacity
         if let unassigned = grouped[""], !unassigned.isEmpty {
             result.append((nil, unassigned))
         }
