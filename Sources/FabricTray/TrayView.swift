@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Color Palette
 
@@ -63,11 +64,98 @@ private struct SkeletonRow: View {
     }
 }
 
+// MARK: - Drag-to-Reorder Helpers
+
+private extension View {
+    @ViewBuilder
+    func editModeDrag(_ active: Bool, data: @escaping () -> NSItemProvider) -> some View {
+        if active {
+            self.onDrag(data)
+        } else {
+            self
+        }
+    }
+}
+
+private struct CapacityDropDelegate: DropDelegate {
+    let targetCapID: String
+    let allCapIDs: [String]
+    let prefs: TrayPreferences
+    @Binding var draggingCapacityID: String?
+    @Binding var draggingWorkspaceID: String?
+    @Binding var draggingCapKey: String?
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingCapacityID, dragging != targetCapID else { return }
+        var order = prefs.capacityOrder.isEmpty ? allCapIDs : prefs.capacityOrder
+        if !order.contains(dragging) { order.append(dragging) }
+        if !order.contains(targetCapID) { order.append(targetCapID) }
+        guard let from = order.firstIndex(of: dragging),
+              let to = order.firstIndex(of: targetCapID) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            prefs.capacityOrder = order
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let accepted = draggingCapacityID != nil
+        draggingCapacityID = nil
+        draggingWorkspaceID = nil
+        draggingCapKey = nil
+        return accepted
+    }
+}
+
+private struct WorkspaceDropDelegate: DropDelegate {
+    let targetWSID: String
+    let capacityKey: String
+    let allWSIDs: [String]
+    let prefs: TrayPreferences
+    @Binding var draggingCapacityID: String?
+    @Binding var draggingWorkspaceID: String?
+    @Binding var draggingCapKey: String?
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingWorkspaceID,
+              dragging != targetWSID,
+              draggingCapKey == capacityKey else { return }
+        var order = prefs.workspaceOrder[capacityKey] ?? allWSIDs
+        if !order.contains(dragging) { order.append(dragging) }
+        if !order.contains(targetWSID) { order.append(targetWSID) }
+        guard let from = order.firstIndex(of: dragging),
+              let to = order.firstIndex(of: targetWSID) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            prefs.workspaceOrder[capacityKey] = order
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let accepted = draggingWorkspaceID != nil && draggingCapKey == capacityKey
+        draggingCapacityID = nil
+        draggingWorkspaceID = nil
+        draggingCapKey = nil
+        return accepted
+    }
+}
+
 struct TrayView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var prefs: TrayPreferences
     @State private var expandedItemID: String?
     @FocusState private var isSearchFocused: Bool
+    @State private var draggingCapacityID: String?
+    @State private var draggingWorkspaceID: String?
+    @State private var draggingCapKey: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -256,6 +344,11 @@ struct TrayView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         appState.isEditMode.toggle()
+                        if !appState.isEditMode {
+                            draggingCapacityID = nil
+                            draggingWorkspaceID = nil
+                            draggingCapKey = nil
+                        }
                     }
                 } label: {
                     Text(appState.isEditMode ? "Done" : "Edit")
@@ -847,32 +940,14 @@ struct TrayView: View {
                         }
 
                         // Capacity group header
+                        let capKey = group.capacity?.id ?? ""
                         HStack(spacing: 0) {
                             if appState.isEditMode {
-                                // Move capacity up/down
-                                VStack(spacing: 2) {
-                                    Button {
-                                        moveCapacity(at: index, direction: -1, groups: groups)
-                                    } label: {
-                                        Image(systemName: "chevron.up")
-                                            .font(.system(size: d.fontMicro))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(index > 0 ? Palette.accent : Palette.muted)
-                                    .disabled(index == 0)
-
-                                    Button {
-                                        moveCapacity(at: index, direction: 1, groups: groups)
-                                    } label: {
-                                        Image(systemName: "chevron.down")
-                                            .font(.system(size: d.fontMicro))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(index < groups.count - 1 ? Palette.accent : Palette.muted)
-                                    .disabled(index >= groups.count - 1)
-                                }
-                                .padding(.leading, d.padSM)
-                                .padding(.trailing, d.padMicro)
+                                Image(systemName: "line.3.horizontal")
+                                    .font(.system(size: d.fontCaption))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, d.padSM)
+                                    .padding(.trailing, d.padMicro)
                             }
 
                             if let cap = group.capacity {
@@ -881,80 +956,84 @@ struct TrayView: View {
                                 noCapacityGroupHeader(workspaceCount: group.workspaces.count)
                             }
                         }
+                        .contentShape(Rectangle())
+                        .opacity(draggingCapacityID == capKey ? 0.4 : 1.0)
+                        .editModeDrag(appState.isEditMode) {
+                            draggingCapacityID = capKey
+                            draggingWorkspaceID = nil
+                            draggingCapKey = nil
+                            return NSItemProvider(object: capKey as NSString)
+                        }
+                        .onDrop(of: [UTType.text], delegate: CapacityDropDelegate(
+                            targetCapID: capKey,
+                            allCapIDs: groups.map { $0.capacity?.id ?? "" },
+                            prefs: prefs,
+                            draggingCapacityID: $draggingCapacityID,
+                            draggingWorkspaceID: $draggingWorkspaceID,
+                            draggingCapKey: $draggingCapKey
+                        ))
 
                         // Workspace rows under this capacity
-                        let capKey = group.capacity?.id ?? ""
-                        ForEach(Array(group.workspaces.enumerated()), id: \.element.id) { wsIndex, ws in
-                            HStack(spacing: 0) {
-                                if appState.isEditMode {
-                                    VStack(spacing: 2) {
-                                        Button {
-                                            moveWorkspace(capacityKey: capKey, at: wsIndex, direction: -1, workspaces: group.workspaces)
-                                        } label: {
-                                            Image(systemName: "chevron.up")
-                                                .font(.system(size: d.fontNano))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundStyle(wsIndex > 0 ? Palette.accent : Palette.muted)
-                                        .disabled(wsIndex == 0)
-
-                                        Button {
-                                            moveWorkspace(capacityKey: capKey, at: wsIndex, direction: 1, workspaces: group.workspaces)
-                                        } label: {
-                                            Image(systemName: "chevron.down")
-                                                .font(.system(size: d.fontNano))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundStyle(wsIndex < group.workspaces.count - 1 ? Palette.accent : Palette.muted)
-                                        .disabled(wsIndex >= group.workspaces.count - 1)
-                                    }
-                                    .padding(.leading, d.padMD)
+                        ForEach(group.workspaces, id: \.id) { ws in
+                            Button {
+                                if !appState.isEditMode {
+                                    Task { await appState.enter(item: ws) }
                                 }
-
-                                Button {
+                            } label: {
+                                HStack(spacing: d.padSM) {
+                                    if appState.isEditMode {
+                                        Image(systemName: "line.3.horizontal")
+                                            .font(.system(size: d.fontMicro))
+                                            .foregroundStyle(.quaternary)
+                                    }
+                                    Image(systemName: ws.icon)
+                                        .font(.system(size: d.fontBody))
+                                        .foregroundStyle(Palette.accent)
+                                        .frame(width: d.iconSize)
+                                    Text(ws.name)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                    if appState.isFavorite(ws.id) {
+                                        Image(systemName: "star.fill")
+                                            .font(.system(size: d.fontNano))
+                                            .foregroundStyle(.yellow)
+                                    }
+                                    Spacer()
                                     if !appState.isEditMode {
-                                        Task { await appState.enter(item: ws) }
-                                    }
-                                } label: {
-                                    HStack(spacing: d.padSM) {
-                                        if appState.isEditMode {
-                                            Image(systemName: "line.3.horizontal")
+                                        if let role = ws.role {
+                                            Text(role.rawValue)
                                                 .font(.system(size: d.fontMicro))
-                                                .foregroundStyle(.quaternary)
+                                                .foregroundStyle(.secondary)
                                         }
-                                        Image(systemName: ws.icon)
-                                            .font(.system(size: d.fontBody))
-                                            .foregroundStyle(Palette.accent)
-                                            .frame(width: d.iconSize)
-                                        Text(ws.name)
-                                            .font(.caption2)
-                                            .lineLimit(1)
-                                        if appState.isFavorite(ws.id) {
-                                            Image(systemName: "star.fill")
-                                                .font(.system(size: d.fontNano))
-                                                .foregroundStyle(.yellow)
-                                        }
-                                        Spacer()
-                                        if !appState.isEditMode {
-                                            if let role = ws.role {
-                                                Text(role.rawValue)
-                                                    .font(.system(size: d.fontMicro))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            Image(systemName: "chevron.right")
-                                                .font(.system(size: d.fontNano))
-                                                .foregroundStyle(.quaternary)
-                                        }
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: d.fontNano))
+                                            .foregroundStyle(.quaternary)
                                     }
-                                    .padding(.horizontal, d.padMD)
-                                    .padding(.leading, appState.isEditMode ? d.padMicro : d.rowHPad)
-                                    .padding(.vertical, d.padXS)
-                                    .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(appState.isEditMode)
-                                .accessibilityLabel("\(ws.name) workspace")
+                                .padding(.horizontal, d.padMD)
+                                .padding(.leading, appState.isEditMode ? d.padMicro : d.rowHPad)
+                                .padding(.vertical, d.padXS)
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .disabled(appState.isEditMode)
+                            .opacity(draggingWorkspaceID == ws.id ? 0.4 : 1.0)
+                            .editModeDrag(appState.isEditMode) {
+                                draggingWorkspaceID = ws.id
+                                draggingCapKey = capKey
+                                draggingCapacityID = nil
+                                return NSItemProvider(object: ws.id as NSString)
+                            }
+                            .onDrop(of: [UTType.text], delegate: WorkspaceDropDelegate(
+                                targetWSID: ws.id,
+                                capacityKey: capKey,
+                                allWSIDs: group.workspaces.map(\.id),
+                                prefs: prefs,
+                                draggingCapacityID: $draggingCapacityID,
+                                draggingWorkspaceID: $draggingWorkspaceID,
+                                draggingCapKey: $draggingCapKey
+                            ))
+                            .accessibilityLabel("\(ws.name) workspace")
                         }
                     }
                 }
@@ -1181,25 +1260,6 @@ struct TrayView: View {
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m \(s % 60)s" }
         return "\(s / 3600)h \((s % 3600) / 60)m"
-    }
-
-    // MARK: - Edit Mode Reordering
-
-    private func moveCapacity(at index: Int, direction: Int, groups: [(capacity: FabricCapacity?, workspaces: [FabricItem])]) {
-        let newIndex = index + direction
-        guard newIndex >= 0, newIndex < groups.count else { return }
-        // Build current order from groups
-        var order = groups.map { $0.capacity?.id ?? "__none__" }
-        order.swapAt(index, newIndex)
-        prefs.capacityOrder = order
-    }
-
-    private func moveWorkspace(capacityKey: String, at index: Int, direction: Int, workspaces: [FabricItem]) {
-        let newIndex = index + direction
-        guard newIndex >= 0, newIndex < workspaces.count else { return }
-        var ids = workspaces.map(\.id)
-        ids.swapAt(index, newIndex)
-        prefs.workspaceOrder[capacityKey] = ids
     }
 
     private func spendColor(_ hourlyRate: Double) -> Color {
