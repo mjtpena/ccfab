@@ -326,14 +326,26 @@ struct TrayView: View {
 
     private var itemList: some View {
         let d = prefs.density
+        // Filter out hidden items
+        let visibleItems = appState.filteredItems.filter { !prefs.hiddenItems.contains($0.id) }
+        let hiddenCount = appState.filteredItems.count - visibleItems.count
+
+        // Group by item type for collapsible sections
+        let typeGroups: [(type: FabricItemType, items: [FabricItem])] = {
+            var dict: [FabricItemType: [FabricItem]] = [:]
+            for item in visibleItems {
+                dict[item.type, default: []].append(item)
+            }
+            // Sort types: favorites first (mixed), then by count descending
+            return dict.sorted { a, b in a.value.count > b.value.count }
+                .map { (type: $0.key, items: $0.value) }
+        }()
+
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if appState.isLoading && appState.allItems.isEmpty {
-                    // Skeleton loading state
-                    ForEach(0..<6, id: \.self) { _ in
-                        SkeletonRow()
-                    }
-                } else if appState.filteredItems.isEmpty && !appState.isLoading {
+                    ForEach(0..<6, id: \.self) { _ in SkeletonRow() }
+                } else if visibleItems.isEmpty && !appState.isLoading {
                     VStack(spacing: d.spacingSM) {
                         Image(systemName: appState.searchQuery.isEmpty ? "tray" : "magnifyingglass")
                             .font(.system(size: d.fontHero))
@@ -345,32 +357,94 @@ struct TrayView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, d.padLG)
                     .accessibilityLabel(appState.searchQuery.isEmpty ? "No items found" : "No matches for search query")
+                } else if typeGroups.count <= 1 || !appState.searchQuery.isEmpty {
+                    // Flat list when single type or searching
+                    ForEach(visibleItems) { item in
+                        itemRowWithDetail(item)
+                    }
                 } else {
-                    ForEach(appState.filteredItems) { item in
-                        VStack(alignment: .leading, spacing: 0) {
-                            ItemRow(
-                                item: item,
-                                isExpanded: expandedItemID == item.id,
-                                isFavorite: appState.isFavorite(item.id)
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    expandedItemID = expandedItemID == item.id ? nil : item.id
+                    // Grouped by type with collapsible headers
+                    let wsID = appState.currentPath.workspaceID ?? ""
+                    ForEach(typeGroups, id: \.type) { group in
+                        let collapseKey = "\(wsID):\(group.type.rawValue)"
+                        let isCollapsed = prefs.collapsedItemTypes.contains(collapseKey)
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                if isCollapsed {
+                                    prefs.collapsedItemTypes.remove(collapseKey)
+                                } else {
+                                    prefs.collapsedItemTypes.insert(collapseKey)
                                 }
                             }
-                            .environmentObject(appState)
+                        } label: {
+                            HStack(spacing: d.padSM) {
+                                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: d.fontMicro, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: d.iconSmall)
+                                Image(systemName: group.items.first?.icon ?? "questionmark.square")
+                                    .font(.system(size: d.fontCaption))
+                                    .foregroundStyle(Palette.accent)
+                                Text(group.type.rawValue)
+                                    .font(.system(size: d.fontCaption, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(group.items.count)")
+                                    .font(.system(size: d.fontMicro, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, d.padMD)
+                            .padding(.vertical, d.padXS)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
 
-                            if expandedItemID == item.id {
-                                ItemDetailView(item: item)
-                                    .environmentObject(appState)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                        if !isCollapsed {
+                            ForEach(group.items) { item in
+                                itemRowWithDetail(item)
                             }
                         }
                     }
                 }
+
+                // Hidden items indicator
+                if hiddenCount > 0 {
+                    HStack(spacing: d.spacingSM) {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: d.fontMicro))
+                        Text("\(hiddenCount) item\(hiddenCount == 1 ? "" : "s") hidden")
+                            .font(.system(size: d.fontMicro))
+                    }
+                    .foregroundStyle(.quaternary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, d.padSM)
+                }
             }
-            .animation(.easeInOut(duration: 0.2), value: appState.filteredItems.map(\.id))
+            .animation(.easeInOut(duration: 0.2), value: visibleItems.map(\.id))
         }
         .frame(minHeight: prefs.density.minListHeight, maxHeight: prefs.density.maxListHeight)
+    }
+
+    private func itemRowWithDetail(_ item: FabricItem) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ItemRow(
+                item: item,
+                isExpanded: expandedItemID == item.id,
+                isFavorite: appState.isFavorite(item.id)
+            ) {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    expandedItemID = expandedItemID == item.id ? nil : item.id
+                }
+            }
+            .environmentObject(appState)
+
+            if expandedItemID == item.id {
+                ItemDetailView(item: item)
+                    .environmentObject(appState)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     // MARK: - Recents Section
@@ -825,7 +899,9 @@ struct TrayView: View {
         let d = prefs.density
         let groups = appState.orderedWorkspacesByCapacity(
             capacityOrder: prefs.capacityOrder,
-            workspaceOrder: prefs.workspaceOrder
+            workspaceOrder: prefs.workspaceOrder,
+            hiddenCapacities: prefs.hiddenCapacities,
+            hiddenWorkspaces: prefs.hiddenWorkspaces
         )
         return ScrollView {
             LazyVStack(spacing: 0) {
@@ -850,53 +926,127 @@ struct TrayView: View {
                             Divider().opacity(0.3).padding(.horizontal, d.padMD)
                         }
 
-                        if let cap = group.capacity {
-                            capacityGroupHeader(cap, workspaceCount: group.workspaces.count)
-                        } else {
-                            noCapacityGroupHeader(workspaceCount: group.workspaces.count)
-                        }
+                        let capKey = group.capacity?.id ?? ""
+                        let isCollapsed = prefs.collapsedCapacities.contains(capKey)
+                        let hiddenCount = countHiddenWorkspaces(capacityId: capKey)
 
-                        // Workspace rows
-                        ForEach(group.workspaces, id: \.id) { ws in
-                            Button {
-                                Task { await appState.enter(item: ws) }
-                            } label: {
-                                HStack(spacing: d.padSM) {
-                                    Image(systemName: ws.icon)
-                                        .font(.system(size: d.fontBody))
-                                        .foregroundStyle(Palette.accent)
-                                        .frame(width: d.iconSize)
-                                    Text(ws.name)
-                                        .font(.caption2)
-                                        .lineLimit(1)
-                                    if appState.isFavorite(ws.id) {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: d.fontNano))
-                                            .foregroundStyle(.yellow)
-                                    }
-                                    Spacer()
-                                    if let role = ws.role {
-                                        Text(role.rawValue)
-                                            .font(.system(size: d.fontMicro))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: d.fontNano))
+                        // Capacity header — tappable to collapse/expand
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if isCollapsed {
+                                    prefs.collapsedCapacities.remove(capKey)
+                                } else {
+                                    prefs.collapsedCapacities.insert(capKey)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 0) {
+                                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: d.fontMicro, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: d.iconSize)
+                                    .padding(.leading, d.padSM)
+
+                                if let cap = group.capacity {
+                                    capacityGroupHeader(cap, workspaceCount: group.workspaces.count)
+                                } else {
+                                    noCapacityGroupHeader(workspaceCount: group.workspaces.count)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        // Collapsed summary + hidden count
+                        if isCollapsed {
+                            HStack(spacing: d.padSM) {
+                                Text("\(group.workspaces.count) workspace\(group.workspaces.count == 1 ? "" : "s")")
+                                    .font(.system(size: d.fontMicro))
+                                    .foregroundStyle(.tertiary)
+                                if hiddenCount > 0 {
+                                    Text("· \(hiddenCount) hidden")
+                                        .font(.system(size: d.fontMicro))
                                         .foregroundStyle(.quaternary)
                                 }
-                                .padding(.horizontal, d.padMD)
-                                .padding(.leading, d.rowHPad)
-                                .padding(.vertical, d.padXS)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(ws.name) workspace")
+                            .padding(.leading, d.padMD + d.iconSize + d.padSM)
+                            .padding(.bottom, d.padXS)
                         }
+
+                        // Workspace rows (only when expanded)
+                        if !isCollapsed {
+                            ForEach(group.workspaces, id: \.id) { ws in
+                                Button {
+                                    Task { await appState.enter(item: ws) }
+                                } label: {
+                                    HStack(spacing: d.padSM) {
+                                        Image(systemName: ws.icon)
+                                            .font(.system(size: d.fontBody))
+                                            .foregroundStyle(Palette.accent)
+                                            .frame(width: d.iconSize)
+                                        Text(ws.name)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                        if appState.isFavorite(ws.id) {
+                                            Image(systemName: "star.fill")
+                                                .font(.system(size: d.fontNano))
+                                                .foregroundStyle(.yellow)
+                                        }
+                                        Spacer()
+                                        if let role = ws.role {
+                                            Text(role.rawValue)
+                                                .font(.system(size: d.fontMicro))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: d.fontNano))
+                                            .foregroundStyle(.quaternary)
+                                    }
+                                    .padding(.horizontal, d.padMD)
+                                    .padding(.leading, d.rowHPad)
+                                    .padding(.vertical, d.padXS)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(ws.name) workspace")
+                            }
+
+                            // Hidden workspaces indicator
+                            if hiddenCount > 0 {
+                                HStack(spacing: d.spacingSM) {
+                                    Image(systemName: "eye.slash")
+                                        .font(.system(size: d.fontMicro))
+                                    Text("\(hiddenCount) hidden")
+                                        .font(.system(size: d.fontMicro))
+                                }
+                                .foregroundStyle(.quaternary)
+                                .padding(.leading, d.padMD + d.rowHPad)
+                                .padding(.vertical, d.padMicro)
+                            }
+                        }
+                    }
+
+                    // Global hidden capacities indicator
+                    if !prefs.hiddenCapacities.isEmpty {
+                        HStack(spacing: d.spacingSM) {
+                            Image(systemName: "eye.slash")
+                                .font(.system(size: d.fontMicro))
+                            Text("\(prefs.hiddenCapacities.count) capacit\(prefs.hiddenCapacities.count == 1 ? "y" : "ies") hidden")
+                                .font(.system(size: d.fontMicro))
+                        }
+                        .foregroundStyle(.quaternary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, d.padSM)
                     }
                 }
             }
         }
         .frame(maxHeight: prefs.density.maxListHeight)
+    }
+
+    private func countHiddenWorkspaces(capacityId: String) -> Int {
+        appState.allItems
+            .filter { $0.type == .workspace && ($0.capacityId ?? "") == capacityId && prefs.hiddenWorkspaces.contains($0.id) }
+            .count
     }
 
     // MARK: - Edit Mode List
@@ -905,21 +1055,57 @@ struct TrayView: View {
         let d = prefs.density
         let groups = appState.orderedWorkspacesByCapacity(
             capacityOrder: prefs.capacityOrder,
-            workspaceOrder: prefs.workspaceOrder
+            workspaceOrder: prefs.workspaceOrder,
+            showHidden: true
         )
+        let hasAnyHidden = !prefs.hiddenCapacities.isEmpty || !prefs.hiddenWorkspaces.isEmpty
         return List {
+            // Show All reset button
+            if hasAnyHidden {
+                Button {
+                    withAnimation { prefs.unhideAll() }
+                } label: {
+                    HStack(spacing: d.padSM) {
+                        Image(systemName: "eye")
+                            .font(.system(size: d.fontCaption))
+                        Text("Show All Hidden")
+                            .font(.system(size: d.fontCaption, weight: .medium))
+                    }
+                    .foregroundStyle(Palette.accent)
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: d.padSM, bottom: 4, trailing: d.padSM))
+            }
+
             ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                 let capKey = group.capacity?.id ?? ""
+                let isCapHidden = prefs.hiddenCapacities.contains(capKey)
                 Section {
                     ForEach(group.workspaces, id: \.id) { ws in
+                        let isWSHidden = prefs.hiddenWorkspaces.contains(ws.id)
                         HStack(spacing: d.padSM) {
+                            Button {
+                                withAnimation {
+                                    if isWSHidden {
+                                        prefs.hiddenWorkspaces.remove(ws.id)
+                                    } else {
+                                        prefs.hiddenWorkspaces.insert(ws.id)
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: isWSHidden ? "eye.slash" : "eye")
+                                    .font(.system(size: d.fontCaption))
+                                    .foregroundStyle(isWSHidden ? Palette.muted.opacity(0.4) : Palette.accent)
+                            }
+                            .buttonStyle(.plain)
+
                             Image(systemName: ws.icon)
                                 .font(.system(size: d.fontCaption))
-                                .foregroundStyle(Palette.accent)
+                                .foregroundStyle(isWSHidden ? Palette.muted.opacity(0.3) : Palette.accent)
                                 .frame(width: 16)
                             Text(ws.name)
                                 .font(.system(size: d.fontCaption))
                                 .lineLimit(1)
+                                .foregroundStyle(isWSHidden ? .secondary : .primary)
                         }
                         .listRowInsets(EdgeInsets(top: 2, leading: d.padSM, bottom: 2, trailing: d.padSM))
                     }
@@ -930,9 +1116,26 @@ struct TrayView: View {
                     }
                 } header: {
                     HStack(spacing: d.padSM) {
+                        // Hide/show capacity toggle
+                        Button {
+                            withAnimation {
+                                if isCapHidden {
+                                    prefs.hiddenCapacities.remove(capKey)
+                                } else {
+                                    prefs.hiddenCapacities.insert(capKey)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: isCapHidden ? "eye.slash" : "eye")
+                                .font(.system(size: 11))
+                                .foregroundStyle(isCapHidden ? Palette.muted.opacity(0.4) : Palette.accent)
+                        }
+                        .buttonStyle(.plain)
+
                         Text(group.capacity?.displayName ?? "No Capacity")
                             .font(.system(size: d.fontCaption, weight: .semibold))
                             .textCase(nil)
+                            .foregroundStyle(isCapHidden ? .secondary : .primary)
                         Spacer()
                         Button {
                             moveCapacityGroup(at: index, direction: -1, groups: groups)

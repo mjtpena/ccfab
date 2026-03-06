@@ -80,6 +80,20 @@ final class TrayPreferences: ObservableObject {
     /// User-defined ordering of workspace IDs within each capacity. Key = capacityID, Value = ordered workspace IDs.
     @Published var workspaceOrder: [String: [String]] = [:]
 
+    // MARK: - Collapse State
+    /// Capacity IDs whose workspace rows are collapsed (hidden under the header).
+    @Published var collapsedCapacities: Set<String> = []
+    /// Keys like "workspaceID:TypeName" for collapsed item-type groups within workspaces.
+    @Published var collapsedItemTypes: Set<String> = []
+
+    // MARK: - Hidden State
+    /// Capacity IDs hidden from normal view.
+    @Published var hiddenCapacities: Set<String> = []
+    /// Workspace IDs hidden from normal view.
+    @Published var hiddenWorkspaces: Set<String> = []
+    /// Item IDs hidden from normal view.
+    @Published var hiddenItems: Set<String> = []
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -90,6 +104,11 @@ final class TrayPreferences: ObservableObject {
            let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
             workspaceOrder = decoded
         }
+        collapsedCapacities = Set(UserDefaults.standard.stringArray(forKey: "collapsedCapacities") ?? [])
+        collapsedItemTypes = Set(UserDefaults.standard.stringArray(forKey: "collapsedItemTypes") ?? [])
+        hiddenCapacities = Set(UserDefaults.standard.stringArray(forKey: "hiddenCapacities") ?? [])
+        hiddenWorkspaces = Set(UserDefaults.standard.stringArray(forKey: "hiddenWorkspaces") ?? [])
+        hiddenItems = Set(UserDefaults.standard.stringArray(forKey: "hiddenItems") ?? [])
 
         $density.dropFirst().sink { newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: "trayDensity")
@@ -104,5 +123,31 @@ final class TrayPreferences: ObservableObject {
                 UserDefaults.standard.set(data, forKey: "workspaceOrder")
             }
         }.store(in: &cancellables)
+
+        $collapsedCapacities.dropFirst().sink { newValue in
+            UserDefaults.standard.set(Array(newValue), forKey: "collapsedCapacities")
+        }.store(in: &cancellables)
+
+        $collapsedItemTypes.dropFirst().sink { newValue in
+            UserDefaults.standard.set(Array(newValue), forKey: "collapsedItemTypes")
+        }.store(in: &cancellables)
+
+        $hiddenCapacities.dropFirst().sink { newValue in
+            UserDefaults.standard.set(Array(newValue), forKey: "hiddenCapacities")
+        }.store(in: &cancellables)
+
+        $hiddenWorkspaces.dropFirst().sink { newValue in
+            UserDefaults.standard.set(Array(newValue), forKey: "hiddenWorkspaces")
+        }.store(in: &cancellables)
+
+        $hiddenItems.dropFirst().sink { newValue in
+            UserDefaults.standard.set(Array(newValue), forKey: "hiddenItems")
+        }.store(in: &cancellables)
+    }
+
+    func unhideAll() {
+        hiddenCapacities.removeAll()
+        hiddenWorkspaces.removeAll()
+        hiddenItems.removeAll()
     }
 }

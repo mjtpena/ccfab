@@ -63,7 +63,13 @@ final class AppState: ObservableObject {
     }
 
     /// Groups workspaces by capacity, applying user-defined ordering when provided.
-    func orderedWorkspacesByCapacity(capacityOrder: [String], workspaceOrder: [String: [String]]) -> [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
+    func orderedWorkspacesByCapacity(
+        capacityOrder: [String],
+        workspaceOrder: [String: [String]],
+        hiddenCapacities: Set<String> = [],
+        hiddenWorkspaces: Set<String> = [],
+        showHidden: Bool = false
+    ) -> [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
         let wsItems = allItems.filter { $0.type == .workspace }
         var grouped: [String: [FabricItem]] = [:]
         for ws in wsItems {
@@ -80,12 +86,13 @@ final class AppState: ObservableObject {
         // Overwrite with self.capacities which have ARM resource IDs, SKU, etc.
         for cap in capacities { capMap[cap.id] = cap }
 
-        // Apply workspace ordering within each group
+        // Apply workspace ordering within each group, filtering hidden workspaces
         func sortedWorkspaces(_ key: String, _ items: [FabricItem]) -> [FabricItem] {
+            let visible = showHidden ? items : items.filter { !hiddenWorkspaces.contains($0.id) }
             let order = workspaceOrder[key] ?? []
-            guard !order.isEmpty else { return items }
+            guard !order.isEmpty else { return visible }
             let posMap = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-            return items.sorted { a, b in
+            return visible.sorted { a, b in
                 let pa = posMap[a.id] ?? Int.max
                 let pb = posMap[b.id] ?? Int.max
                 if pa != pb { return pa < pb }
@@ -97,10 +104,11 @@ final class AppState: ObservableObject {
 
         // Known capacities (active then inactive, alphabetical) — or user-defined order
         let knownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] != nil }
+        let filteredKnown = showHidden ? knownKeys : knownKeys.filter { !hiddenCapacities.contains($0) }
         let sortedKnown: [String]
         if !capacityOrder.isEmpty {
             let posMap = Dictionary(uniqueKeysWithValues: capacityOrder.enumerated().map { ($1, $0) })
-            sortedKnown = knownKeys.sorted { a, b in
+            sortedKnown = Array(filteredKnown).sorted { a, b in
                 let pa = posMap[a] ?? Int.max
                 let pb = posMap[b] ?? Int.max
                 if pa != pb { return pa < pb }
@@ -109,7 +117,7 @@ final class AppState: ObservableObject {
                 return capA.displayName < capB.displayName
             }
         } else {
-            sortedKnown = knownKeys.sorted { a, b in
+            sortedKnown = Array(filteredKnown).sorted { a, b in
                 let capA = capMap[a]!, capB = capMap[b]!
                 if capA.isActive != capB.isActive { return capA.isActive }
                 return capA.displayName < capB.displayName
@@ -120,8 +128,9 @@ final class AppState: ObservableObject {
         }
 
         // Unknown capacities (have ID but no details at all) — one group per capacity ID
-        let unknownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] == nil }.sorted()
-        for key in unknownKeys {
+        let unknownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] == nil }
+        let filteredUnknown = showHidden ? unknownKeys : unknownKeys.filter { !hiddenCapacities.contains($0) }
+        for key in filteredUnknown.sorted() {
             let shortId = String(key.prefix(8))
             let placeholder = FabricCapacity(
                 id: key, displayName: "Capacity (\(shortId)…)", sku: "",
