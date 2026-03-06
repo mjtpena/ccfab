@@ -20,6 +20,7 @@ final class AppState: ObservableObject {
     @Published var allItems: [FabricItem] = []
     @Published var searchQuery = ""
     @Published var isLoading = false
+    @Published var isEditMode = false
 
     // Favorites & Recents
     @Published var favoriteIDs: Set<String> = []
@@ -58,6 +59,11 @@ final class AppState: ObservableObject {
     /// Workspaces grouped by their capacity. Groups with known capacity details show rich info;
     /// workspaces on unknown capacities (no admin access) get a placeholder; unassigned get nil.
     var workspacesByCapacity: [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
+        return orderedWorkspacesByCapacity(capacityOrder: [], workspaceOrder: [:])
+    }
+
+    /// Groups workspaces by capacity, applying user-defined ordering when provided.
+    func orderedWorkspacesByCapacity(capacityOrder: [String], workspaceOrder: [String: [String]]) -> [(capacity: FabricCapacity?, workspaces: [FabricItem])] {
         let wsItems = allItems.filter { $0.type == .workspace }
         var grouped: [String: [FabricItem]] = [:]
         for ws in wsItems {
@@ -73,17 +79,44 @@ final class AppState: ObservableObject {
         }
         // Overwrite with self.capacities which have ARM resource IDs, SKU, etc.
         for cap in capacities { capMap[cap.id] = cap }
+
+        // Apply workspace ordering within each group
+        func sortedWorkspaces(_ key: String, _ items: [FabricItem]) -> [FabricItem] {
+            let order = workspaceOrder[key] ?? []
+            guard !order.isEmpty else { return items }
+            let posMap = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
+            return items.sorted { a, b in
+                let pa = posMap[a.id] ?? Int.max
+                let pb = posMap[b.id] ?? Int.max
+                if pa != pb { return pa < pb }
+                return a.name < b.name
+            }
+        }
+
         var result: [(FabricCapacity?, [FabricItem])] = []
 
-        // Known capacities first (active then inactive, alphabetical)
-        let knownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] != nil }.sorted { a, b in
-            let capA = capMap[a]!
-            let capB = capMap[b]!
-            if capA.isActive != capB.isActive { return capA.isActive }
-            return capA.displayName < capB.displayName
+        // Known capacities (active then inactive, alphabetical) — or user-defined order
+        let knownKeys = grouped.keys.filter { !$0.isEmpty && capMap[$0] != nil }
+        let sortedKnown: [String]
+        if !capacityOrder.isEmpty {
+            let posMap = Dictionary(uniqueKeysWithValues: capacityOrder.enumerated().map { ($1, $0) })
+            sortedKnown = knownKeys.sorted { a, b in
+                let pa = posMap[a] ?? Int.max
+                let pb = posMap[b] ?? Int.max
+                if pa != pb { return pa < pb }
+                let capA = capMap[a]!, capB = capMap[b]!
+                if capA.isActive != capB.isActive { return capA.isActive }
+                return capA.displayName < capB.displayName
+            }
+        } else {
+            sortedKnown = knownKeys.sorted { a, b in
+                let capA = capMap[a]!, capB = capMap[b]!
+                if capA.isActive != capB.isActive { return capA.isActive }
+                return capA.displayName < capB.displayName
+            }
         }
-        for key in knownKeys {
-            result.append((capMap[key], grouped[key] ?? []))
+        for key in sortedKnown {
+            result.append((capMap[key], sortedWorkspaces(key, grouped[key] ?? [])))
         }
 
         // Unknown capacities (have ID but no details at all) — one group per capacity ID
@@ -94,12 +127,12 @@ final class AppState: ObservableObject {
                 id: key, displayName: "Capacity (\(shortId)…)", sku: "",
                 region: "", state: "Active"
             )
-            result.append((placeholder, grouped[key] ?? []))
+            result.append((placeholder, sortedWorkspaces(key, grouped[key] ?? [])))
         }
 
         // No capacity
         if let unassigned = grouped[""], !unassigned.isEmpty {
-            result.append((nil, unassigned))
+            result.append((nil, sortedWorkspaces("", unassigned)))
         }
         return result
     }

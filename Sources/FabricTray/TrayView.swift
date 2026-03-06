@@ -250,6 +250,22 @@ struct TrayView: View {
             }
 
             authButton
+
+            // Edit mode toggle (only on root capacity view)
+            if appState.isSignedIn && appState.currentPath.isRoot {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        appState.isEditMode.toggle()
+                    }
+                } label: {
+                    Text(appState.isEditMode ? "Done" : "Edit")
+                        .font(.system(size: d.fontCaption, weight: .medium))
+                        .foregroundStyle(appState.isEditMode ? Palette.accent : Palette.muted)
+                }
+                .buttonStyle(.plain)
+                .help(appState.isEditMode ? "Finish editing" : "Reorder capacities & workspaces")
+                .accessibilityLabel(appState.isEditMode ? "Done editing" : "Edit order")
+            }
         }
         .padding(.horizontal, d.padMD)
         .padding(.vertical, d.spacingLG)
@@ -803,11 +819,13 @@ struct TrayView: View {
 
     private var capacityFirstList: some View {
         let d = prefs.density
+        let groups = appState.orderedWorkspacesByCapacity(
+            capacityOrder: prefs.capacityOrder,
+            workspaceOrder: prefs.workspaceOrder
+        )
         return ScrollView {
             LazyVStack(spacing: 0) {
-                let groups = appState.workspacesByCapacity
                 if groups.isEmpty && !appState.isLoading {
-                    // Loading state or truly empty
                     if appState.allItems.isEmpty {
                         VStack(spacing: d.padSM) {
                             Image(systemName: "cpu")
@@ -829,47 +847,114 @@ struct TrayView: View {
                         }
 
                         // Capacity group header
-                        if let cap = group.capacity {
-                            capacityGroupHeader(cap, workspaceCount: group.workspaces.count)
-                        } else {
-                            noCapacityGroupHeader(workspaceCount: group.workspaces.count)
+                        HStack(spacing: 0) {
+                            if appState.isEditMode {
+                                // Move capacity up/down
+                                VStack(spacing: 2) {
+                                    Button {
+                                        moveCapacity(at: index, direction: -1, groups: groups)
+                                    } label: {
+                                        Image(systemName: "chevron.up")
+                                            .font(.system(size: d.fontMicro))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(index > 0 ? Palette.accent : Palette.muted)
+                                    .disabled(index == 0)
+
+                                    Button {
+                                        moveCapacity(at: index, direction: 1, groups: groups)
+                                    } label: {
+                                        Image(systemName: "chevron.down")
+                                            .font(.system(size: d.fontMicro))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(index < groups.count - 1 ? Palette.accent : Palette.muted)
+                                    .disabled(index >= groups.count - 1)
+                                }
+                                .padding(.leading, d.padSM)
+                                .padding(.trailing, d.padMicro)
+                            }
+
+                            if let cap = group.capacity {
+                                capacityGroupHeader(cap, workspaceCount: group.workspaces.count)
+                            } else {
+                                noCapacityGroupHeader(workspaceCount: group.workspaces.count)
+                            }
                         }
 
                         // Workspace rows under this capacity
-                        ForEach(group.workspaces, id: \.id) { ws in
-                            Button {
-                                Task { await appState.enter(item: ws) }
-                            } label: {
-                                HStack(spacing: d.padSM) {
-                                    Image(systemName: ws.icon)
-                                        .font(.system(size: d.fontBody))
-                                        .foregroundStyle(Palette.accent)
-                                        .frame(width: d.iconSize)
-                                    Text(ws.name)
-                                        .font(.caption2)
-                                        .lineLimit(1)
-                                    if appState.isFavorite(ws.id) {
-                                        Image(systemName: "star.fill")
-                                            .font(.system(size: d.fontNano))
-                                            .foregroundStyle(.yellow)
+                        let capKey = group.capacity?.id ?? ""
+                        ForEach(Array(group.workspaces.enumerated()), id: \.element.id) { wsIndex, ws in
+                            HStack(spacing: 0) {
+                                if appState.isEditMode {
+                                    VStack(spacing: 2) {
+                                        Button {
+                                            moveWorkspace(capacityKey: capKey, at: wsIndex, direction: -1, workspaces: group.workspaces)
+                                        } label: {
+                                            Image(systemName: "chevron.up")
+                                                .font(.system(size: d.fontNano))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(wsIndex > 0 ? Palette.accent : Palette.muted)
+                                        .disabled(wsIndex == 0)
+
+                                        Button {
+                                            moveWorkspace(capacityKey: capKey, at: wsIndex, direction: 1, workspaces: group.workspaces)
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                                .font(.system(size: d.fontNano))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(wsIndex < group.workspaces.count - 1 ? Palette.accent : Palette.muted)
+                                        .disabled(wsIndex >= group.workspaces.count - 1)
                                     }
-                                    Spacer()
-                                    if let role = ws.role {
-                                        Text(role.rawValue)
-                                            .font(.system(size: d.fontMicro))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: d.fontNano))
-                                        .foregroundStyle(.quaternary)
+                                    .padding(.leading, d.padMD)
                                 }
-                                .padding(.horizontal, d.padMD)
-                                .padding(.leading, d.rowHPad)
-                                .padding(.vertical, d.padXS)
-                                .contentShape(Rectangle())
+
+                                Button {
+                                    if !appState.isEditMode {
+                                        Task { await appState.enter(item: ws) }
+                                    }
+                                } label: {
+                                    HStack(spacing: d.padSM) {
+                                        if appState.isEditMode {
+                                            Image(systemName: "line.3.horizontal")
+                                                .font(.system(size: d.fontMicro))
+                                                .foregroundStyle(.quaternary)
+                                        }
+                                        Image(systemName: ws.icon)
+                                            .font(.system(size: d.fontBody))
+                                            .foregroundStyle(Palette.accent)
+                                            .frame(width: d.iconSize)
+                                        Text(ws.name)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                        if appState.isFavorite(ws.id) {
+                                            Image(systemName: "star.fill")
+                                                .font(.system(size: d.fontNano))
+                                                .foregroundStyle(.yellow)
+                                        }
+                                        Spacer()
+                                        if !appState.isEditMode {
+                                            if let role = ws.role {
+                                                Text(role.rawValue)
+                                                    .font(.system(size: d.fontMicro))
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: d.fontNano))
+                                                .foregroundStyle(.quaternary)
+                                        }
+                                    }
+                                    .padding(.horizontal, d.padMD)
+                                    .padding(.leading, appState.isEditMode ? d.padMicro : d.rowHPad)
+                                    .padding(.vertical, d.padXS)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(appState.isEditMode)
+                                .accessibilityLabel("\(ws.name) workspace")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(ws.name) workspace")
                         }
                     }
                 }
@@ -1096,6 +1181,25 @@ struct TrayView: View {
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m \(s % 60)s" }
         return "\(s / 3600)h \((s % 3600) / 60)m"
+    }
+
+    // MARK: - Edit Mode Reordering
+
+    private func moveCapacity(at index: Int, direction: Int, groups: [(capacity: FabricCapacity?, workspaces: [FabricItem])]) {
+        let newIndex = index + direction
+        guard newIndex >= 0, newIndex < groups.count else { return }
+        // Build current order from groups
+        var order = groups.map { $0.capacity?.id ?? "__none__" }
+        order.swapAt(index, newIndex)
+        prefs.capacityOrder = order
+    }
+
+    private func moveWorkspace(capacityKey: String, at index: Int, direction: Int, workspaces: [FabricItem]) {
+        let newIndex = index + direction
+        guard newIndex >= 0, newIndex < workspaces.count else { return }
+        var ids = workspaces.map(\.id)
+        ids.swapAt(index, newIndex)
+        prefs.workspaceOrder[capacityKey] = ids
     }
 
     private func spendColor(_ hourlyRate: Double) -> Color {

@@ -75,13 +75,34 @@ enum TrayDensity: String, CaseIterable, Identifiable {
 
 final class TrayPreferences: ObservableObject {
     @Published var density: TrayDensity
-    private var cancellable: AnyCancellable?
+    /// User-defined ordering of capacity IDs. Empty = default (active first, alphabetical).
+    @Published var capacityOrder: [String] = []
+    /// User-defined ordering of workspace IDs within each capacity. Key = capacityID, Value = ordered workspace IDs.
+    @Published var workspaceOrder: [String: [String]] = [:]
+
+    private var cancellables = Set<AnyCancellable>()
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "trayDensity") ?? "M"
         density = TrayDensity(rawValue: raw) ?? .standard
-        cancellable = $density.dropFirst().sink { newValue in
-            UserDefaults.standard.set(newValue.rawValue, forKey: "trayDensity")
+        capacityOrder = UserDefaults.standard.stringArray(forKey: "capacityOrder") ?? []
+        if let data = UserDefaults.standard.data(forKey: "workspaceOrder"),
+           let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            workspaceOrder = decoded
         }
+
+        $density.dropFirst().sink { newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: "trayDensity")
+        }.store(in: &cancellables)
+
+        $capacityOrder.dropFirst().sink { newValue in
+            UserDefaults.standard.set(newValue, forKey: "capacityOrder")
+        }.store(in: &cancellables)
+
+        $workspaceOrder.dropFirst().sink { newValue in
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: "workspaceOrder")
+            }
+        }.store(in: &cancellables)
     }
 }
