@@ -9,10 +9,12 @@ private enum Palette {
     static let success = Color.green
     static let warning = Color.orange
     static let muted = Color.secondary
-    static let faint = Color.primary.opacity(0.04)
-    static let hoverBG = Color.primary.opacity(0.07)
-    static let sectionBG = Color.primary.opacity(0.025)
-    static let separator = Color.primary.opacity(0.08)
+    static let faint = Color.primary.opacity(0.03)
+    static let hoverBG = Color.primary.opacity(0.06)
+    static let sectionBG = Color.primary.opacity(0.04)
+    static let separator = Color.primary.opacity(0.06)
+    static let glassFill = Color.primary.opacity(0.03)
+    static let glassBorder = Color.primary.opacity(0.08)
 }
 
 // MARK: - Shimmer Loading
@@ -75,7 +77,7 @@ struct TrayView: View {
                     .environmentObject(appState)
             } else {
                 headerBar
-                Divider().opacity(0.5)
+                Divider().opacity(0.3)
 
                 if appState.isSignedIn {
                     // Root: show capacities as top-level parents
@@ -88,7 +90,7 @@ struct TrayView: View {
                         // Workspace / sub-item level
                         itemList
 
-                        Divider().opacity(0.5)
+                        Divider().opacity(0.3)
                         jobsSection
                     }
                 } else {
@@ -97,11 +99,12 @@ struct TrayView: View {
 
                 statusBar
 
-                Divider().opacity(0.5)
+                Divider().opacity(0.3)
                 footerBar
             }
         }
         .frame(width: prefs.density.windowWidth)
+        .background(.ultraThinMaterial)
         .task {
             if appState.isSignedIn {
                 await appState.refresh()
@@ -189,8 +192,12 @@ struct TrayView: View {
                 .padding(.horizontal, d.padSM)
                 .padding(.vertical, d.searchFieldVPad)
                 .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isSearchFocused ? Palette.faint.opacity(2) : Palette.faint)
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSearchFocused ? Palette.glassFill.opacity(3) : Palette.glassFill)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(isSearchFocused ? Palette.accent.opacity(0.3) : Palette.glassBorder, lineWidth: 0.5)
+                        )
                 )
             } else {
                 Spacer()
@@ -462,7 +469,16 @@ struct TrayView: View {
             .padding(.horizontal, d.rowHPad)
             .padding(.vertical, d.padXS)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.success.opacity(0.08))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Palette.success.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Palette.success.opacity(0.15), lineWidth: 0.5)
+                    )
+            )
+            .padding(.horizontal, d.padSM)
+            .padding(.vertical, d.padMicro)
             .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
             .accessibilityLabel("Success: \(toast)")
         }
@@ -506,7 +522,16 @@ struct TrayView: View {
             .padding(.horizontal, d.rowHPad)
             .padding(.vertical, d.padXS)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.destructive.opacity(0.06))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Palette.destructive.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Palette.destructive.opacity(0.12), lineWidth: 0.5)
+                    )
+            )
+            .padding(.horizontal, d.padSM)
+            .padding(.vertical, d.padMicro)
             .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
             .accessibilityLabel("Error: \(error)")
         }
@@ -865,7 +890,7 @@ struct TrayView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, d.badgePadH)
                         .padding(.vertical, d.padMicro)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(capacityColor(cap)))
+                        .background(RoundedRectangle(cornerRadius: 4).fill(capacityColor(cap)))
                 } else {
                     Image(systemName: "lock.shield")
                         .font(.system(size: d.fontBody))
@@ -977,8 +1002,12 @@ struct TrayView: View {
                             .padding(.horizontal, d.padSM)
                             .padding(.vertical, d.padXS)
                             .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(cap.isActive ? Palette.warning : Palette.success, lineWidth: 0.5)
+                                Capsule()
+                                    .fill((cap.isActive ? Palette.warning : Palette.success).opacity(0.08))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder((cap.isActive ? Palette.warning : Palette.success).opacity(0.25), lineWidth: 0.5)
+                                    )
                             )
                         }
                         .buttonStyle(.plain)
@@ -999,7 +1028,16 @@ struct TrayView: View {
         }
         .padding(.horizontal, d.padMD)
         .padding(.vertical, d.padSM)
-        .background(Palette.sectionBG)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.glassFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Palette.glassBorder, lineWidth: 0.5)
+                )
+        )
+        .padding(.horizontal, d.padSM)
+        .padding(.top, d.padSM)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(cap.displayName), \(cap.sku.isEmpty ? "" : cap.sku + ", ")\(workspaceCount) workspaces")
     }
@@ -1028,7 +1066,16 @@ struct TrayView: View {
         }
         .padding(.horizontal, d.padMD)
         .padding(.vertical, d.padSM)
-        .background(Palette.sectionBG)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Palette.glassFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Palette.glassBorder, lineWidth: 0.5)
+                )
+        )
+        .padding(.horizontal, d.padSM)
+        .padding(.top, d.padSM)
         .accessibilityLabel("Shared capacity, \(workspaceCount) workspaces")
     }
 
@@ -1158,7 +1205,7 @@ struct ItemDetailView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, d.padXS)
                         .padding(.vertical, d.padMicro)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(capColor(cap)))
+                        .background(RoundedRectangle(cornerRadius: 4).fill(capColor(cap)))
                     Text(cap.displayName)
                         .font(.system(size: d.fontCaption))
                         .foregroundStyle(Palette.muted)
@@ -1171,7 +1218,7 @@ struct ItemDetailView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, d.padXS)
                             .padding(.vertical, d.badgePadV)
-                            .background(RoundedRectangle(cornerRadius: 3).fill(Palette.destructive))
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Palette.destructive))
                     }
                 }
                 .padding(.bottom, d.padXS)
@@ -1198,7 +1245,7 @@ struct ItemDetailView: View {
                                 .foregroundStyle(.quaternary)
                                 .padding(.horizontal, d.padXS)
                                 .padding(.vertical, d.badgePadV)
-                                .background(RoundedRectangle(cornerRadius: 3).fill(Palette.faint))
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Palette.faint))
                             Button {
                                 appState.requestRemoveRole(ra, workspaceID: item.id)
                             } label: {
@@ -1261,7 +1308,7 @@ struct ItemDetailView: View {
                         .foregroundStyle(Palette.warning)
                         .padding(.horizontal, d.badgePadH)
                         .padding(.vertical, d.padMicro)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(Palette.warning.opacity(0.1)))
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Palette.warning.opacity(0.1)))
                     }
                 }
             } else {
@@ -1334,7 +1381,7 @@ struct ItemRow: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, d.padXS)
                                 .padding(.vertical, d.badgePadV)
-                                .background(RoundedRectangle(cornerRadius: 3).fill(skuColor(cap)))
+                                .background(RoundedRectangle(cornerRadius: 4).fill(skuColor(cap)))
                             if !cap.isActive {
                                 Image(systemName: "pause.circle.fill")
                                     .font(.system(size: d.fontCaption))
@@ -1356,7 +1403,7 @@ struct ItemRow: View {
                         .foregroundStyle(Palette.warning)
                         .padding(.horizontal, d.padXS)
                         .padding(.vertical, d.badgePadV)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(Palette.warning.opacity(0.12)))
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Palette.warning.opacity(0.12)))
                         .lineLimit(1)
                 }
                 Text(item.type.rawValue)

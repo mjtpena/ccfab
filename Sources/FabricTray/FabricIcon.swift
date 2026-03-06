@@ -10,11 +10,8 @@ enum FabricIcon {
     }
 
     static func trayIcon() -> NSImage? {
-        // Try SVG first
-        if let svg = loadSVG(named: "fabric_tray", size: 18, isTemplate: true) {
-            return svg
-        }
-        // Programmatic fallback: faceted diamond as template image
+        // Always use programmatic drawing for the menu bar icon.
+        // SVGs with currentColor don't render reliably with NSImage(data:).
         return drawTrayDiamond(size: 18)
     }
 
